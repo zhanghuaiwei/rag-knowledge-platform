@@ -3,7 +3,7 @@
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 
-import { Loading } from "@/components/ui";
+import { Loading } from "@/components/async-state";
 import { isAuthed } from "@/lib/auth";
 
 /** 路由守卫（mock）：(main) 分组内页面要求登录态，未登录跳 /login。 */

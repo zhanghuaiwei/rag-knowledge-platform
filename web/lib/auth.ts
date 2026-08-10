@@ -1,9 +1,12 @@
 /**
- * 登录态（mock 演示）：localStorage 持有会话标记。
+ * 登录态（开发阶段 mock）：localStorage 持有会话标记。
  *
- * 真实实现为 OIDC Authorization Code + PKCE（GKB-02）：登录后由后端签发
- * HttpOnly Cookie / 内存 access token，前端不持久化凭证；本模块届时仅保留
- * 守卫跳转语义。企业平台不开放自助注册，成员由管理员邀请（管理中心 → 成员与组织）。
+ * 开发阶段保留表单登录,供本地与演示环境使用;真实实现为 OIDC Authorization
+ * Code + PKCE(GKB-02)：登录后由后端签发 HttpOnly Cookie / 内存 access token,
+ * 前端不持久化凭证,届时本模块仅保留守卫跳转语义。
+ *
+ * 认证边界：表单登录仅用于开发/演示环境,生产环境不暴露;企业平台不开放自助
+ * 注册,成员由管理员邀请(管理中心 → 成员与组织)。
  */
 
 export const AUTH_STORAGE_KEY = "ragkb-auth";

@@ -1,27 +1,69 @@
 "use client";
 
-import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { Avatar, Button, Drawer, Dropdown, Input, Layout, Menu, Tooltip } from "antd";
+import type { MenuProps } from "antd";
+import {
+  ApiOutlined,
+  ApartmentOutlined,
+  BarChartOutlined,
+  CheckOutlined,
+  DashboardOutlined,
+  DatabaseOutlined,
+  DownOutlined,
+  FileDoneOutlined,
+  FileTextOutlined,
+  KeyOutlined,
+  LogoutOutlined,
+  MenuFoldOutlined,
+  MenuOutlined,
+  MenuUnfoldOutlined,
+  MessageOutlined,
+  MonitorOutlined,
+  MoonOutlined,
+  SafetyCertificateOutlined,
+  SearchOutlined,
+  SettingOutlined,
+  SunOutlined,
+  TeamOutlined,
+} from "@ant-design/icons";
 
 import { api } from "@/api-client";
 import type { CurrentUser } from "@/api-client";
-import { Icon, type IconName } from "@/components/icons";
+import { useToast } from "@/components/feedback";
 import { useTheme } from "@/components/theme-provider";
-import { Drawer, Dropdown, Switch, useToast } from "@/components/ui";
+import { ThemeSettings } from "@/components/theme-settings";
 import { clearSession } from "@/lib/auth";
-import { PRIMARY_PRESETS, resolveMode, type ThemeConfig, type ThemeMode } from "@/lib/theme";
+import { resolveMode } from "@/lib/theme";
+
+type NavIconKey = "dashboard" | "chat" | "search" | "kb" | "doc" | "shield" | "chart" | "monitor" | "users" | "key" | "webhook" | "audit";
 
 interface NavItem {
   href: string;
   label: string;
-  icon: IconName;
+  icon: NavIconKey;
 }
 
 interface NavGroup {
   section: string;
   items: NavItem[];
 }
+
+const NAV_ICON: Record<NavIconKey, ReactNode> = {
+  dashboard: <DashboardOutlined />,
+  chat: <MessageOutlined />,
+  search: <SearchOutlined />,
+  kb: <DatabaseOutlined />,
+  doc: <FileTextOutlined />,
+  shield: <SafetyCertificateOutlined />,
+  chart: <BarChartOutlined />,
+  monitor: <MonitorOutlined />,
+  users: <TeamOutlined />,
+  key: <KeyOutlined />,
+  webhook: <ApiOutlined />,
+  audit: <FileDoneOutlined />,
+};
 
 const NAV: NavGroup[] = [
   {
@@ -58,6 +100,16 @@ const NAV: NavGroup[] = [
   },
 ];
 
+const MENU_ITEMS: MenuProps["items"] = NAV.map((group) => ({
+  type: "group",
+  label: group.section,
+  children: group.items.map((item) => ({
+    key: item.href,
+    icon: NAV_ICON[item.icon],
+    label: item.label,
+  })),
+}));
+
 /** mock 租户列表：真实环境由租户成员关系接口返回（待契约）。 */
 const MOCK_TENANTS = [
   { id: 1, name: "云图科技" },
@@ -73,14 +125,28 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<CurrentUser | null>(null);
   const [tenantId, setTenantId] = useState(1);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [mobileOpen, setMobileOpen] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
   const [globalKeyword, setGlobalKeyword] = useState("");
 
   useEffect(() => {
     api.getCurrentUser().then(setUser).catch(() => undefined);
   }, []);
 
-  useEffect(() => setMobileOpen(false), [pathname]);
+  useEffect(() => setMobileMenuOpen(false), [pathname]);
+
+  const collapsed = config.sidebarCollapsed;
+  const dark = resolveMode(config.mode) === "dark";
+
+  const selectedKey = useMemo(
+    () =>
+      NAV.flatMap((g) => g.items).find(
+        (item) => pathname === item.href || pathname.startsWith(`${item.href}/`),
+      )?.href ?? "",
+    [pathname],
+  );
+
+  const tenantName = MOCK_TENANTS.find((t) => t.id === tenantId)?.name ?? user?.tenantName ?? "";
 
   const switchTenant = (id: number) => {
     if (id === tenantId) return;
@@ -94,247 +160,138 @@ export function AppShell({ children }: { children: ReactNode }) {
     if (kw) router.push(`/search?keyword=${encodeURIComponent(kw)}`);
   };
 
-  const collapsed = config.sidebarCollapsed;
-  const tenantName = MOCK_TENANTS.find((t) => t.id === tenantId)?.name ?? user?.tenantName ?? "";
+  const navigate = ({ key }: { key: string }) => router.push(key);
 
-  const shellClass = ["shell", collapsed ? "collapsed" : "", mobileOpen ? "mobile-open" : ""].filter(Boolean).join(" ");
+  const tenantMenu: MenuProps["items"] = [
+    ...MOCK_TENANTS.map((t) => ({
+      key: String(t.id),
+      label: t.name,
+      icon: t.id === tenantId ? <CheckOutlined /> : undefined,
+    })),
+    { type: "divider" },
+    { key: "hint", label: "切换租户将清空当前缓存上下文", disabled: true },
+  ];
+
+  const userMenu: MenuProps["items"] = [
+    {
+      key: "info",
+      label: (
+        <div>
+          <div style={{ fontWeight: 600 }}>{user?.name ?? "加载中…"}</div>
+          <div style={{ fontSize: 12, color: "var(--text-3)" }}>{user?.email}</div>
+          <div style={{ fontSize: 12, color: "var(--text-3)" }}>{user?.orgName}</div>
+        </div>
+      ),
+      disabled: true,
+    },
+    { type: "divider" },
+    {
+      key: "logout",
+      icon: <LogoutOutlined />,
+      label: "退出登录",
+      danger: true,
+      onClick: () => {
+        clearSession();
+        router.replace("/login");
+      },
+    },
+  ];
+
+  const siderMenu = (
+    <Menu
+      mode="inline"
+      inlineCollapsed={collapsed && !isMobile}
+      items={MENU_ITEMS}
+      selectedKeys={[selectedKey]}
+      onClick={navigate}
+      style={{ borderInlineEnd: 0, background: "transparent" }}
+    />
+  );
 
   return (
-    <div className={shellClass}>
-      <div className="sidebar-mask" onClick={() => setMobileOpen(false)} />
-
-      <aside className="shell-sidebar">
-        <div className="shell-brand">
+    <Layout style={{ minHeight: "100vh" }}>
+      <Layout.Sider
+        width={220}
+        collapsedWidth={isMobile ? 0 : 64}
+        collapsible
+        collapsed={collapsed}
+        trigger={null}
+        breakpoint="lg"
+        onBreakpoint={setIsMobile}
+        theme="light"
+        className="shell-sider"
+        style={{ background: "var(--surface)", borderRight: "1px solid var(--border)" }}
+      >
+        <div className="shell-brand" style={{ justifyContent: collapsed ? "center" : undefined, padding: collapsed ? 0 : undefined }}>
           <span className="brand-logo">知</span>
-          <span className="nav-label">知识库平台</span>
+          {!collapsed ? <span style={{ fontWeight: 700, fontSize: 15 }}>知识库平台</span> : null}
         </div>
-        <nav className="shell-nav">
-          {NAV.map((group) => (
-            <div key={group.section}>
-              <div className="nav-section">{group.section}</div>
-              {group.items.map((item) => {
-                const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
-                return (
-                  <Link key={item.href} className={`nav-item${active ? " active" : ""}`} href={item.href} title={item.label}>
-                    <Icon name={item.icon} size={17} />
-                    <span className="nav-label">{item.label}</span>
-                  </Link>
-                );
-              })}
-            </div>
-          ))}
-        </nav>
-      </aside>
+        {siderMenu}
+      </Layout.Sider>
 
-      <div className="shell-body">
-        <header className="shell-topbar">
-          <button className="icon-btn hamburger" onClick={() => setMobileOpen(true)} aria-label="打开菜单">
-            <Icon name="menu" />
-          </button>
-          <button
-            className="icon-btn"
-            onClick={() => update({ sidebarCollapsed: !collapsed })}
-            aria-label={collapsed ? "展开侧边栏" : "收起侧边栏"}
-            title={collapsed ? "展开侧边栏" : "收起侧边栏"}
-          >
-            <Icon name="menu" />
-          </button>
+      <Layout>
+        <Layout.Header className="shell-topbar" style={{ background: "var(--surface)", borderBottom: "1px solid var(--border)", height: 60, lineHeight: "60px", padding: "0 20px" }}>
+          {isMobile ? (
+            <Button type="text" icon={<MenuOutlined />} aria-label="打开菜单" onClick={() => setMobileMenuOpen(true)} />
+          ) : (
+            <Tooltip title={collapsed ? "展开侧边栏" : "收起侧边栏"}>
+              <Button type="text" aria-label="收起侧边栏" icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />} onClick={() => update({ sidebarCollapsed: !collapsed })} />
+            </Tooltip>
+          )}
 
-          <div className="topbar-search">
-            <Icon name="search" size={15} />
-            <input
-              placeholder="全局搜索文档…"
-              value={globalKeyword}
-              onChange={(e) => setGlobalKeyword(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && submitGlobalSearch()}
-              aria-label="全局搜索"
-            />
-          </div>
+          <Input
+            className="topbar-search-input"
+            prefix={<SearchOutlined />}
+            placeholder="全局搜索文档…"
+            value={globalKeyword}
+            onChange={(e) => setGlobalKeyword(e.target.value)}
+            onPressEnter={submitGlobalSearch}
+            allowClear
+            aria-label="全局搜索"
+            style={{ flex: 1, maxWidth: 420 }}
+          />
 
           <div style={{ flex: 1 }} />
 
-          <Dropdown
-            align="right"
-            trigger={
-              <span className="btn btn-sm" style={{ gap: 6 }}>
-                <Icon name="building" size={14} />
-                <span style={{ maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis" }}>{tenantName}</span>
-                <Icon name="chevron-down" size={13} />
-              </span>
-            }
-          >
-            {MOCK_TENANTS.map((tenant) => (
-              <button key={tenant.id} className={`dropdown-item${tenant.id === tenantId ? " active" : ""}`} onClick={() => switchTenant(tenant.id)}>
-                <Icon name="building" size={14} />
-                {tenant.name}
-                {tenant.id === tenantId ? <Icon name="check" size={14} /> : null}
-              </button>
-            ))}
-            <div className="dropdown-divider" />
-            <div style={{ padding: "4px 10px", fontSize: 12, color: "var(--text-3)" }}>切换租户将清空当前缓存上下文</div>
+          <Dropdown menu={{ items: tenantMenu, onClick: ({ key }) => switchTenant(Number(key)) }} trigger={["click"]}>
+            <Button type="text" icon={<ApartmentOutlined />} style={{ maxWidth: 180 }}>
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "inline-block", maxWidth: 120 }}>{tenantName}</span>
+              <DownOutlined style={{ fontSize: 10 }} />
+            </Button>
           </Dropdown>
 
-          <button
-            className="icon-btn"
-            onClick={() => update({ mode: resolveMode(config.mode) === "dark" ? "light" : "dark" })}
-            aria-label="切换明暗主题"
-            title="切换明暗主题"
-          >
-            <Icon name={resolveMode(config.mode) === "dark" ? "sun" : "moon"} />
-          </button>
-          <button className="icon-btn" onClick={() => setSettingsOpen(true)} aria-label="外观设置" title="外观设置">
-            <Icon name="settings" />
-          </button>
+          <Tooltip title={dark ? "切换到浅色" : "切换到深色"}>
+            <Button type="text" icon={dark ? <SunOutlined /> : <MoonOutlined />} aria-label="切换明暗主题" onClick={() => update({ mode: dark ? "light" : "dark" })} />
+          </Tooltip>
+          <Tooltip title="外观设置">
+            <Button type="text" icon={<SettingOutlined />} aria-label="外观设置" onClick={() => setSettingsOpen(true)} />
+          </Tooltip>
 
-          <Dropdown
-            trigger={
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                <span className="avatar">{user?.name?.slice(0, 1) ?? "…"}</span>
-              </span>
-            }
-          >
-            <div style={{ padding: "8px 10px" }}>
-              <div style={{ fontWeight: 600 }}>{user?.name ?? "加载中…"}</div>
-              <div style={{ fontSize: 12, color: "var(--text-3)" }}>{user?.email}</div>
-              <div style={{ fontSize: 12, color: "var(--text-3)", marginTop: 2 }}>{user?.orgName}</div>
-            </div>
-            <div className="dropdown-divider" />
-            <button
-              className="dropdown-item"
-              onClick={() => {
-                clearSession();
-                router.replace("/login");
-              }}
-            >
-              <Icon name="logout" size={14} /> 退出登录
-            </button>
+          <Dropdown menu={{ items: userMenu }} trigger={["click"]}>
+            <Button type="text" icon={<Avatar size={28} style={{ background: "linear-gradient(135deg,var(--primary),var(--violet))", color: "#fff", fontSize: 13 }}>{user?.name?.slice(0, 1) ?? "…"}</Avatar>} aria-label="用户菜单" />
           </Dropdown>
-        </header>
+        </Layout.Header>
 
-        <main className="shell-main">
+        <Layout.Content className="shell-main">
           {/* key=tenantId：切换租户即整体重挂载，清空旧租户缓存（mock 演示语义） */}
           <div className="shell-main-inner" key={tenantId}>
             {children}
           </div>
-        </main>
-      </div>
+        </Layout.Content>
+      </Layout>
 
       <ThemeSettings open={settingsOpen} onClose={() => setSettingsOpen(false)} />
-    </div>
+
+      <Drawer
+        placement="left"
+        width={240}
+        open={mobileMenuOpen}
+        onClose={() => setMobileMenuOpen(false)}
+        title="知识库平台"
+        styles={{ body: { padding: 0 } }}
+      >
+        <Menu mode="inline" items={MENU_ITEMS} selectedKeys={[selectedKey]} onClick={navigate} style={{ borderInlineEnd: 0 }} />
+      </Drawer>
+    </Layout>
   );
 }
-
-function ThemeSettings({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { config, update, reset } = useTheme();
-  return (
-    <Drawer title="外观与布局设置" open={open} onClose={onClose}>
-      <div className="setting-row">
-        <div>
-          <div className="setting-label">主题模式</div>
-          <div className="setting-desc">「跟随系统」随操作系统明暗自动切换</div>
-        </div>
-        <div className="seg">
-          {([["light", "浅色"], ["dark", "深色"], ["system", "跟随系统"]] as [ThemeMode, string][]).map(([mode, label]) => (
-            <button key={mode} className={`seg-item${config.mode === mode ? " active" : ""}`} onClick={() => update({ mode })}>
-              {label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="setting-row">
-        <div>
-          <div className="setting-label">字号</div>
-          <div className="setting-desc">全局基础字号档位</div>
-        </div>
-        <div className="seg">
-          {([["small", "小"], ["standard", "标准"], ["large", "大"]] as const).map(([size, label]) => (
-            <button key={size} className={`seg-item${config.fontSize === size ? " active" : ""}`} onClick={() => update({ fontSize: size })}>
-              {label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="setting-row" style={{ alignItems: "flex-start" }}>
-        <div>
-          <div className="setting-label">主题色</div>
-          <div className="setting-desc">应用于主按钮、高亮与图表</div>
-        </div>
-        <div className="swatch-row">
-          {PRIMARY_PRESETS.map((preset) => (
-            <button
-              key={preset.key}
-              className={`swatch${config.primary === preset.key ? " active" : ""}`}
-              style={{ background: preset.color, color: preset.color }}
-              title={preset.name}
-              aria-label={`主题色 ${preset.name}`}
-              onClick={() => update({ primary: preset.key })}
-            />
-          ))}
-        </div>
-      </div>
-
-      <div className="setting-row">
-        <div>
-          <div className="setting-label">圆角大小</div>
-          <div className="setting-desc">{config.radius}px</div>
-        </div>
-        <input
-          type="range"
-          min={2}
-          max={16}
-          value={config.radius}
-          onChange={(e) => update({ radius: Number(e.target.value) })}
-          aria-label="圆角大小"
-        />
-      </div>
-
-      <div className="setting-row">
-        <div>
-          <div className="setting-label">紧凑密度</div>
-          <div className="setting-desc">缩小卡片、表格与输入间距</div>
-        </div>
-        <Switch checked={config.density === "compact"} onChange={(v) => update({ density: v ? "compact" : "comfortable" })} />
-      </div>
-
-      <div className="setting-row">
-        <div>
-          <div className="setting-label">固定内容宽度</div>
-          <div className="setting-desc">大屏下限制内容最大宽度居中</div>
-        </div>
-        <Switch checked={config.contentWidth === "fixed"} onChange={(v) => update({ contentWidth: v ? "fixed" : "fluid" })} />
-      </div>
-
-      <div className="setting-row">
-        <div>
-          <div className="setting-label">默认收起侧边栏</div>
-          <div className="setting-desc">仅保留图标的窄栏模式</div>
-        </div>
-        <Switch checked={config.sidebarCollapsed} onChange={(v) => update({ sidebarCollapsed: v })} />
-      </div>
-
-      <div className="setting-row">
-        <div>
-          <div className="setting-label">页面动画</div>
-          <div className="setting-desc">关闭后去除过渡与入场动效</div>
-        </div>
-        <Switch checked={config.animations} onChange={(v) => update({ animations: v })} />
-      </div>
-
-      <div className="setting-row">
-        <div>
-          <div className="setting-label">灰色模式</div>
-          <div className="setting-desc">全站去色，适用于特殊日期</div>
-        </div>
-        <Switch checked={config.grayscale} onChange={(v) => update({ grayscale: v })} />
-      </div>
-
-      <button className="btn btn-block" style={{ marginTop: 20 }} onClick={reset}>
-        恢复默认设置
-      </button>
-    </Drawer>
-  );
-}
-
-export type { ThemeConfig };

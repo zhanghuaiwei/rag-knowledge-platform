@@ -2,11 +2,13 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
+import { Button, Card, Input, Pagination, Select, Space, Table, Tag } from "antd";
+import type { TableColumnsType } from "antd";
+import { UploadOutlined } from "@ant-design/icons";
 
 import { api } from "@/api-client";
-import type { IngestStatus, ReviewStatus, Sensitivity } from "@/api-client";
-import { Icon } from "@/components/icons";
-import { Empty, ErrorState, Pagination, SkeletonRows, Tag } from "@/components/ui";
+import type { DocumentSummary, IngestStatus, ReviewStatus, Sensitivity } from "@/api-client";
+import { Empty, ErrorState } from "@/components/async-state";
 import { UploadDocumentModal } from "@/components/upload-document-modal";
 import { formatFileSize, formatRelative, statusText } from "@/lib/format";
 import { useAsync } from "@/lib/use-async";
@@ -63,6 +65,63 @@ function DocumentsPageInner() {
     }
   };
 
+  const columns: TableColumnsType<DocumentSummary> = [
+    {
+      title: "文档",
+      key: "title",
+      render: (_, doc) => (
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span className="file-icon">{doc.fileExt}</span>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontWeight: 500 }}>{doc.title}</div>
+            <div style={{ fontSize: 12, color: "var(--text-3)" }}>v{doc.versionNo} · {doc.chunkCount} 分块</div>
+          </div>
+        </div>
+      ),
+    },
+    { title: "知识库", dataIndex: "kbName" },
+    {
+      title: "大小",
+      dataIndex: "fileSize",
+      width: 90,
+      render: (v: number) => formatFileSize(v),
+    },
+    {
+      title: "摄取状态",
+      dataIndex: "ingestStatus",
+      width: 110,
+      render: (v: IngestStatus) => {
+        const [label, color] = statusText("ingest", v);
+        return <Tag color={color}>{label}</Tag>;
+      },
+    },
+    {
+      title: "审核",
+      dataIndex: "reviewStatus",
+      width: 100,
+      render: (v: ReviewStatus) => {
+        const [label, color] = statusText("review", v);
+        return <Tag color={color}>{label}</Tag>;
+      },
+    },
+    {
+      title: "敏感级",
+      dataIndex: "sensitivity",
+      width: 90,
+      render: (v: Sensitivity) => {
+        const [label, color] = statusText("sensitivity", v);
+        return <Tag color={color}>{label}</Tag>;
+      },
+    },
+    { title: "所有者", dataIndex: "ownerName", width: 100 },
+    {
+      title: "更新",
+      dataIndex: "updatedAt",
+      width: 110,
+      render: (v: string) => formatRelative(v),
+    },
+  ];
+
   return (
     <div className="page">
       <div className="page-header">
@@ -71,79 +130,84 @@ function DocumentsPageInner() {
           <p className="page-desc">跨知识库文档视图，仅显示你有权访问的内容</p>
         </div>
         <div className="page-actions">
-          <button className="btn btn-primary" onClick={() => setUploadOpen(true)}>
-            <Icon name="upload" size={15} /> 上传文档
-          </button>
+          <Button type="primary" icon={<UploadOutlined />} onClick={() => setUploadOpen(true)}>
+            上传文档
+          </Button>
         </div>
       </div>
 
-      <div className="card">
-        <div className="toolbar">
-          <input
-            className="input"
+      <Card>
+        <Space wrap>
+          <Input
             placeholder="搜索标题或文件名…"
             value={keywordInput}
             onChange={(e) => setKeywordInput(e.target.value)}
+            allowClear
+            style={{ width: 220 }}
             aria-label="文档关键词"
           />
-          <select className="select" value={kbId} onChange={(e) => { setKbId(e.target.value); resetPage(); }} aria-label="知识库">
-            <option value="">全部知识库</option>
-            {kbs.data?.items.map((kb) => <option key={kb.id} value={kb.id}>{kb.name}</option>)}
-          </select>
-          <select className="select" value={ingest} onChange={(e) => { setIngest(e.target.value); resetPage(); }} aria-label="摄取状态">
-            <option value="">摄取状态</option>
-            {INGEST_OPTIONS.map((s) => <option key={s} value={s}>{statusText("ingest", s)[0]}</option>)}
-          </select>
-          <select className="select" value={review} onChange={(e) => { setReview(e.target.value); resetPage(); }} aria-label="审核状态">
-            <option value="">审核状态</option>
-            {REVIEW_OPTIONS.map((s) => <option key={s} value={s}>{statusText("review", s)[0]}</option>)}
-          </select>
-          <select className="select" value={sensitivity} onChange={(e) => { setSensitivity(e.target.value); resetPage(); }} aria-label="敏感级">
-            <option value="">敏感级</option>
-            {SENS_OPTIONS.map((s) => <option key={s} value={s}>{statusText("sensitivity", s)[0]}</option>)}
-          </select>
-        </div>
-      </div>
+          <Select
+            placeholder="全部知识库"
+            allowClear
+            value={kbId || undefined}
+            onChange={(v) => { setKbId(v ?? ""); resetPage(); }}
+            options={(kbs.data?.items ?? []).map((kb) => ({ value: String(kb.id), label: kb.name }))}
+            style={{ width: 160 }}
+          />
+          <Select
+            placeholder="摄取状态"
+            allowClear
+            value={ingest || undefined}
+            onChange={(v) => { setIngest(v ?? ""); resetPage(); }}
+            options={INGEST_OPTIONS.map((s) => ({ value: s, label: statusText("ingest", s)[0] }))}
+            style={{ width: 130 }}
+          />
+          <Select
+            placeholder="审核状态"
+            allowClear
+            value={review || undefined}
+            onChange={(v) => { setReview(v ?? ""); resetPage(); }}
+            options={REVIEW_OPTIONS.map((s) => ({ value: s, label: statusText("review", s)[0] }))}
+            style={{ width: 130 }}
+          />
+          <Select
+            placeholder="敏感级"
+            allowClear
+            value={sensitivity || undefined}
+            onChange={(v) => { setSensitivity(v ?? ""); resetPage(); }}
+            options={SENS_OPTIONS.map((s) => ({ value: s, label: statusText("sensitivity", s)[0] }))}
+            style={{ width: 110 }}
+          />
+        </Space>
+      </Card>
 
-      {docs.loading ? (
-        <div className="card"><SkeletonRows rows={6} height={56} /></div>
-      ) : docs.error ? (
-        <div className="card"><ErrorState message={docs.error} onRetry={docs.reload} /></div>
-      ) : (docs.data?.items.length ?? 0) === 0 ? (
-        <div className="card"><Empty icon="📄" title="没有匹配的文档" desc="调整筛选条件，或文档不在你的权限范围内" /></div>
+      {docs.error ? (
+        <Card>
+          <ErrorState message={docs.error} onRetry={docs.reload} />
+        </Card>
       ) : (
-        <div className="table-wrap">
-          <table className="table">
-            <thead>
-              <tr><th>文档</th><th>知识库</th><th>大小</th><th>摄取状态</th><th>审核</th><th>敏感级</th><th>所有者</th><th>更新</th></tr>
-            </thead>
-            <tbody>
-              {docs.data?.items.map((doc) => (
-                <tr key={doc.id} className="clickable" onClick={() => router.push(`/documents/${doc.id}`)}>
-                  <td>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                      <span className="file-icon">{doc.fileExt}</span>
-                      <div style={{ minWidth: 0 }}>
-                        <div style={{ fontWeight: 500 }}>{doc.title}</div>
-                        <div style={{ fontSize: 12, color: "var(--text-3)" }}>v{doc.versionNo} · {doc.chunkCount} 分块</div>
-                      </div>
-                    </div>
-                  </td>
-                  <td>{doc.kbName}</td>
-                  <td>{formatFileSize(doc.fileSize)}</td>
-                  <td><Tag color={statusText("ingest", doc.ingestStatus)[1]}>{statusText("ingest", doc.ingestStatus)[0]}</Tag></td>
-                  <td><Tag color={statusText("review", doc.reviewStatus)[1]}>{statusText("review", doc.reviewStatus)[0]}</Tag></td>
-                  <td><Tag color={statusText("sensitivity", doc.sensitivity)[1]}>{statusText("sensitivity", doc.sensitivity)[0]}</Tag></td>
-                  <td>{doc.ownerName}</td>
-                  <td>{formatRelative(doc.updatedAt)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Card>
+          <Table<DocumentSummary>
+            rowKey="id"
+            columns={columns}
+            dataSource={docs.data?.items ?? []}
+            loading={docs.loading}
+            scroll={{ x: 880 }}
+            pagination={false}
+            onRow={(doc) => ({
+              onClick: () => router.push(`/documents/${doc.id}`),
+            })}
+            locale={{
+              emptyText: <Empty icon="📄" title="没有匹配的文档" desc="调整筛选条件，或文档不在你的权限范围内" />,
+            }}
+          />
+          {docs.data ? (
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
+              <Pagination current={page} pageSize={10} total={docs.data.total} onChange={setPage} showTotal={(t) => `共 ${t} 条`} />
+            </div>
+          ) : null}
+        </Card>
       )}
-
-      {docs.data ? <Pagination page={page} size={10} total={docs.data.total} onChange={setPage} /> : null}
 
       <UploadDocumentModal
         open={uploadOpen}
@@ -157,7 +221,7 @@ function DocumentsPageInner() {
 
 export default function DocumentsPage() {
   return (
-    <Suspense fallback={<div className="card"><SkeletonRows rows={5} /></div>}>
+    <Suspense fallback={<Card loading />}>
       <DocumentsPageInner />
     </Suspense>
   );

@@ -1,16 +1,20 @@
 "use client";
 
 import { useState } from "react";
+import { Button, Card, Pagination, Select, Table, Tag, Typography } from "antd";
+import type { TableColumnsType } from "antd";
+import { DownloadOutlined } from "@ant-design/icons";
 
 import { api } from "@/api-client";
-import { Icon } from "@/components/icons";
-import { Empty, ErrorState, Pagination, SkeletonRows, Tag, useToast } from "@/components/ui";
+import type { AuditLog } from "@/api-client";
+import { Empty, ErrorState, SkeletonRows } from "@/components/async-state";
+import { useToast } from "@/components/feedback";
 import { formatDateTime } from "@/lib/format";
 import { useAsync } from "@/lib/use-async";
 
-const RESULT_TEXT: Record<string, [string, string]> = {
+const RESULT_TAG: Record<AuditLog["result"], [string, string]> = {
   SUCCEEDED: ["成功", "success"],
-  DENIED: ["被拒绝", "danger"],
+  DENIED: ["被拒绝", "error"],
   FAILED: ["失败", "warning"],
 };
 
@@ -20,11 +24,9 @@ export default function AuditPage() {
   const [resultFilter, setResultFilter] = useState("");
   // 筛选下沉为查询参数（服务端过滤 + 正确分页），不再前端过滤当前页
   const logs = useAsync(
-    () => api.listAuditLogs({ page, size: 12, result: (resultFilter || undefined) as "SUCCEEDED" | "DENIED" | "FAILED" | undefined }),
+    () => api.listAuditLogs({ page, size: 12, result: (resultFilter || undefined) as AuditLog["result"] | undefined }),
     [page, resultFilter],
   );
-
-  const items = logs.data?.items ?? [];
 
   const copyRequestId = async (requestId: string) => {
     try {
@@ -35,6 +37,42 @@ export default function AuditPage() {
     }
   };
 
+  const columns: TableColumnsType<AuditLog> = [
+    { title: "时间", dataIndex: "occurredAt", width: 150, render: (v: string) => <span style={{ whiteSpace: "nowrap" }}>{formatDateTime(v)}</span> },
+    {
+      title: "操作者",
+      key: "actor",
+      render: (_, log) => (
+        <>
+          {log.actor}{" "}
+          <Tag color={log.actorType === "USER" ? "blue" : log.actorType === "API_KEY" ? "processing" : "default"}>{log.actorType}</Tag>
+        </>
+      ),
+    },
+    { title: "动作", dataIndex: "action" },
+    { title: "资源", dataIndex: "resourceType", render: (v: string, log) => `${v} #${log.resourceId}` },
+    {
+      title: "结果",
+      dataIndex: "result",
+      width: 90,
+      render: (v: AuditLog["result"]) => {
+        const [label, color] = RESULT_TAG[v];
+        return <Tag color={color}>{label}</Tag>;
+      },
+    },
+    { title: "原因码", dataIndex: "reasonCode", width: 110, render: (v: string | null) => v ?? "—" },
+    {
+      title: "requestId",
+      dataIndex: "requestId",
+      width: 130,
+      render: (v: string) => (
+        <Typography.Link onClick={() => void copyRequestId(v)} title="点击复制 requestId">
+          {v.slice(0, 8)}…
+        </Typography.Link>
+      ),
+    },
+  ];
+
   return (
     <div className="page">
       <div className="page-header">
@@ -43,53 +81,49 @@ export default function AuditPage() {
           <p className="page-desc">追加写语义，记录策略版本与操作结果；导出遵循最小权限与脱敏</p>
         </div>
         <div className="page-actions">
-          <select className="select" style={{ width: "auto" }} value={resultFilter} onChange={(e) => { setResultFilter(e.target.value); setPage(1); }} aria-label="结果筛选">
-            <option value="">全部结果</option>
-            <option value="SUCCEEDED">成功</option>
-            <option value="DENIED">被拒绝</option>
-            <option value="FAILED">失败</option>
-          </select>
-          <button className="btn" onClick={() => toast("info", "mock：审计导出需权限校验与脱敏（契约待冻结）")}>
-            <Icon name="download" size={15} /> 导出
-          </button>
+          <Select
+            value={resultFilter || undefined}
+            onChange={(v) => { setResultFilter(v ?? ""); setPage(1); }}
+            allowClear
+            placeholder="全部结果"
+            style={{ width: 130 }}
+            options={[
+              { value: "SUCCEEDED", label: "成功" },
+              { value: "DENIED", label: "被拒绝" },
+              { value: "FAILED", label: "失败" },
+            ]}
+          />
+          <Button icon={<DownloadOutlined />} onClick={() => toast("info", "mock：审计导出需权限校验与脱敏（契约待冻结）")}>
+            导出
+          </Button>
         </div>
       </div>
 
       {logs.loading ? (
-        <div className="card"><SkeletonRows rows={8} /></div>
+        <Card>
+          <SkeletonRows rows={8} />
+        </Card>
       ) : logs.error ? (
-        <div className="card"><ErrorState message={logs.error} onRetry={logs.reload} /></div>
-      ) : items.length === 0 ? (
-        <div className="card"><Empty icon="🧾" title="无匹配日志" /></div>
+        <Card>
+          <ErrorState message={logs.error} onRetry={logs.reload} />
+        </Card>
       ) : (
-        <div className="table-wrap">
-          <table className="table">
-            <thead><tr><th>时间</th><th>操作者</th><th>动作</th><th>资源</th><th>结果</th><th>原因码</th><th>requestId</th></tr></thead>
-            <tbody>
-              {items.map((log) => (
-                <tr key={log.id}>
-                  <td style={{ whiteSpace: "nowrap" }}>{formatDateTime(log.occurredAt)}</td>
-                  <td>
-                    {log.actor}
-                    <Tag color={log.actorType === "USER" ? "primary" : log.actorType === "API_KEY" ? "info" : ""}>{log.actorType}</Tag>
-                  </td>
-                  <td>{log.action}</td>
-                  <td>{log.resourceType} #{log.resourceId}</td>
-                  <td><Tag color={RESULT_TEXT[log.result]?.[1] ?? ""}>{RESULT_TEXT[log.result]?.[0] ?? log.result}</Tag></td>
-                  <td>{log.reasonCode ?? "—"}</td>
-                  <td>
-                    <button className="btn btn-sm btn-ghost" onClick={() => void copyRequestId(log.requestId)} title="点击复制 requestId">
-                      <Icon name="copy" size={12} /> {log.requestId.slice(0, 8)}…
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Card>
+          <Table<AuditLog>
+            rowKey="id"
+            columns={columns}
+            dataSource={logs.data?.items ?? []}
+            scroll={{ x: 960 }}
+            pagination={false}
+            locale={{ emptyText: <Empty icon="🧾" title="无匹配日志" /> }}
+          />
+          {logs.data ? (
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
+              <Pagination current={page} pageSize={12} total={logs.data.total} onChange={setPage} showTotal={(t) => `共 ${t} 条`} />
+            </div>
+          ) : null}
+        </Card>
       )}
-
-      {logs.data ? <Pagination page={page} size={12} total={logs.data.total} onChange={setPage} /> : null}
     </div>
   );
 }

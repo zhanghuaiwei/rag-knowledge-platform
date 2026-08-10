@@ -2,19 +2,29 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
+import { Button, Divider, Form, Input } from "antd";
+import { ApartmentOutlined, LockOutlined, MailOutlined } from "@ant-design/icons";
 
-import { Icon } from "@/components/icons";
 import { isAuthed, setSession } from "@/lib/auth";
 
-/** mock 演示账号：真实环境走 OIDC，由企业 IdP 承载认证与 MFA。 */
-const DEMO_ACCOUNT = { email: "admin@ragkb.dev", password: "admin123" };
+/**
+ * 开发/演示账号：开发阶段保留表单登录,供本地与演示环境使用。
+ * 生产环境走 OIDC,由企业 IdP 承载认证与 MFA,表单登录不暴露。
+ */
+const DEV_ACCOUNTS = [
+  { email: "admin@ragkb.dev", password: "admin123", role: "管理员" },
+  { email: "user@ragkb.dev", password: "user123", role: "普通成员" },
+];
+const DEFAULT_DEV_ACCOUNT = DEV_ACCOUNTS[0];
+
+interface LoginFormValues {
+  email: string;
+  password: string;
+}
 
 function LoginPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
   const from = searchParams.get("from");
@@ -25,25 +35,15 @@ function LoginPageInner() {
     if (isAuthed()) router.replace("/dashboard");
   }, [router]);
 
-  const login = (loginEmail: string) => {
-    setSession(loginEmail);
+  const login = (email: string) => {
+    setSession(email);
     router.replace(target);
   };
 
-  const submit = () => {
-    const trimmed = email.trim();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
-      setError("请输入有效的企业邮箱");
-      return;
-    }
-    if (password.length < 6) {
-      setError("密码至少 6 位");
-      return;
-    }
-    setError("");
+  const onFinish = (values: LoginFormValues) => {
     setLoading(true);
-    // mock 校验：演示账号或任意「域邮箱 + 6 位以上密码」均可进入
-    setTimeout(() => login(trimmed), 500);
+    // 开发阶段保留表单登录：演示账号或任意「域邮箱 + 6 位以上密码」均可进入
+    setTimeout(() => login(values.email.trim()), 500);
   };
 
   return (
@@ -55,57 +55,49 @@ function LoginPageInner() {
           问答 · 搜索 · 治理 · 运营，权限正确且可追溯
         </p>
 
-        <form
-          style={{ textAlign: "left" }}
-          onSubmit={(e) => {
-            e.preventDefault();
-            submit();
-          }}
+        <Form<LoginFormValues>
+          layout="vertical"
+          requiredMark={false}
+          onFinish={onFinish}
         >
-          <div className="field">
-            <label className="field-label" htmlFor="login-email">企业邮箱</label>
-            <input
-              id="login-email"
-              className="input"
-              type="email"
-              autoComplete="username"
-              placeholder="name@company.com"
-              value={email}
-              onChange={(e) => { setEmail(e.target.value); setError(""); }}
-            />
-          </div>
-          <div className="field">
-            <label className="field-label" htmlFor="login-password">密码</label>
-            <input
-              id="login-password"
-              className="input"
-              type="password"
-              autoComplete="current-password"
-              placeholder="至少 6 位"
-              value={password}
-              onChange={(e) => { setPassword(e.target.value); setError(""); }}
-              onKeyDown={(e) => e.key === "Enter" && submit()}
-            />
-          </div>
-          {error ? <p className="field-error" style={{ marginBottom: 12 }}>{error}</p> : null}
-          <button type="submit" className="btn btn-primary btn-lg btn-block" disabled={loading}>
-            {loading ? "登录中…" : "登录"}
-          </button>
-        </form>
+          <Form.Item
+            name="email"
+            label="企业邮箱"
+            rules={[
+              { required: true, message: "请输入企业邮箱" },
+              { type: "email", message: "请输入有效的企业邮箱" },
+            ]}
+          >
+            <Input size="large" autoComplete="username" placeholder="name@company.com" prefix={<MailOutlined />} />
+          </Form.Item>
+          <Form.Item
+            name="password"
+            label="密码"
+            rules={[
+              { required: true, message: "请输入密码" },
+              { min: 6, message: "密码至少 6 位" },
+            ]}
+          >
+            <Input.Password size="large" autoComplete="current-password" placeholder="至少 6 位" prefix={<LockOutlined />} />
+          </Form.Item>
+          <Form.Item style={{ marginBottom: 12 }}>
+            <Button type="primary" htmlType="submit" size="large" block loading={loading}>
+              {loading ? "登录中…" : "登录"}
+            </Button>
+          </Form.Item>
+        </Form>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "16px 0", color: "var(--text-3)", fontSize: 12 }}>
-          <span style={{ flex: 1, height: 1, background: "var(--border)" }} />
-          或
-          <span style={{ flex: 1, height: 1, background: "var(--border)" }} />
-        </div>
-        <button className="btn btn-block" onClick={() => login(DEMO_ACCOUNT.email)} disabled={loading}>
-          <Icon name="building" size={16} /> 使用企业 SSO 登录
-        </button>
+        <Divider plain>或</Divider>
+
+        <Button block size="large" icon={<ApartmentOutlined />} onClick={() => login(DEFAULT_DEV_ACCOUNT.email)} disabled={loading}>
+          使用企业 SSO 登录
+        </Button>
 
         <p style={{ fontSize: 12, color: "var(--text-3)", marginTop: 18 }}>
-          演示账号：{DEMO_ACCOUNT.email} / {DEMO_ACCOUNT.password}（任意邮箱 + 6 位以上密码亦可）
+          开发账号（开发/演示环境生效,生产环境走 OIDC）：
+          {DEV_ACCOUNTS.map((a) => `${a.email} / ${a.password}（${a.role}）`).join(" · ")}
           <br />
-          无账号请联系管理员邀请开通 · 生产环境为 OIDC Authorization Code + PKCE
+          任意「域邮箱 + 6 位以上密码」亦可直接进入 · 企业平台不开放自助注册,成员由管理员邀请开通
         </p>
       </div>
     </div>

@@ -43,25 +43,28 @@ export function formatCost(cost: number): string {
   return `¥${cost.toFixed(cost < 1 ? 4 : 2)}`;
 }
 
-/** 枚举 → 中文文案与 tag 颜色（展示层语义，枚举值本身以契约为准）。 */
+/**
+ * 枚举 → 中文文案与 antd Tag 预设色（展示层语义，枚举值本身以契约为准）。
+ * 颜色值直接对应 antd <Tag color>：success / error / warning / processing / blue / purple / 默认。
+ */
 export const STATUS_TEXT = {
   ingest: {
-    UPLOADING: ["上传中", "info"], QUARANTINED: ["隔离区", "warning"], SCANNING: ["安全扫描", "info"],
-    PARSING: ["解析中", "info"], CHUNKING: ["分块中", "info"], EMBEDDING: ["向量化", "info"],
-    INDEXING: ["索引中", "info"], READY: ["就绪", "success"], FAILED: ["失败", "danger"], BLOCKED: ["安全阻断", "danger"],
+    UPLOADING: ["上传中", "processing"], QUARANTINED: ["隔离区", "warning"], SCANNING: ["安全扫描", "processing"],
+    PARSING: ["解析中", "processing"], CHUNKING: ["分块中", "processing"], EMBEDDING: ["向量化", "processing"],
+    INDEXING: ["索引中", "processing"], READY: ["就绪", "success"], FAILED: ["失败", "error"], BLOCKED: ["安全阻断", "error"],
   },
   review: {
-    DRAFT: ["草稿", ""], PENDING_REVIEW: ["待审核", "warning"], PUBLISHED: ["已发布", "success"],
-    REJECTED: ["已驳回", "danger"], WITHDRAWN: ["已撤回", ""],
+    DRAFT: ["草稿", "default"], PENDING_REVIEW: ["待审核", "warning"], PUBLISHED: ["已发布", "success"],
+    REJECTED: ["已驳回", "error"], WITHDRAWN: ["已撤回", "default"],
   },
   sensitivity: {
-    PUBLIC: ["公开", "success"], INTERNAL: ["内部", "info"], CONFIDENTIAL: ["机密", "warning"], RESTRICTED: ["绝密", "danger"],
+    PUBLIC: ["公开", "success"], INTERNAL: ["内部", "processing"], CONFIDENTIAL: ["机密", "warning"], RESTRICTED: ["绝密", "error"],
   },
   answer: {
     ANSWERED: ["已回答", "success"], NO_ANSWER: ["未找到答案", "warning"],
-    LOW_CONFIDENCE: ["低置信度", "warning"], BLOCKED: ["已拦截", "danger"],
+    LOW_CONFIDENCE: ["低置信度", "warning"], BLOCKED: ["已拦截", "error"],
   },
-  kbRole: { OWNER: ["所有者", "violet"], EDITOR: ["编辑", "primary"], VIEWER: ["查看者", ""] },
+  kbRole: { OWNER: ["所有者", "purple"], EDITOR: ["编辑", "blue"], VIEWER: ["查看者", "default"] },
 } as const;
 
 export type StatusDomain = keyof typeof STATUS_TEXT;

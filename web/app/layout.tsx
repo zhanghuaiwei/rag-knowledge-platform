@@ -4,7 +4,6 @@ import type { ReactNode } from "react";
 
 import { AntdProvider } from "@/components/antd-provider";
 import { ThemeProvider } from "@/components/theme-provider";
-import { ToastProvider } from "@/components/ui";
 import { buildThemeInitScript } from "@/lib/theme";
 import "./globals.css";
 
@@ -23,9 +22,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       <body>
         <AntdRegistry>
           <ThemeProvider>
-            <AntdProvider>
-              <ToastProvider>{children}</ToastProvider>
-            </AntdProvider>
+            <AntdProvider>{children}</AntdProvider>
           </ThemeProvider>
         </AntdRegistry>
       </body>

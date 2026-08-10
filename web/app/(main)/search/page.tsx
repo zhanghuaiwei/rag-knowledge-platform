@@ -3,13 +3,19 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
+import { Button, Card, Form, Input, Pagination, Select, Tag } from "antd";
+import { SearchOutlined } from "@ant-design/icons";
 
 import { api } from "@/api-client";
 import type { SearchItem } from "@/api-client";
-import { Icon } from "@/components/icons";
-import { Empty, ErrorState, Pagination, SkeletonRows, Tag } from "@/components/ui";
+import { Empty, ErrorState, SkeletonRows } from "@/components/async-state";
 import { formatDate } from "@/lib/format";
 import { useAsync } from "@/lib/use-async";
+
+interface SearchFormValues {
+  keyword?: string;
+  kbId?: number;
+}
 
 function highlight(text: string, keyword: string) {
   if (!keyword) return text;
@@ -20,9 +26,9 @@ function highlight(text: string, keyword: string) {
 function SearchPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [keyword, setKeyword] = useState(searchParams.get("keyword") ?? "");
-  const [submitted, setSubmitted] = useState(searchParams.get("keyword") ?? "");
-  const [kbFilter, setKbFilter] = useState("");
+  const [form] = Form.useForm<SearchFormValues>();
+  const initialKeyword = searchParams.get("keyword") ?? "";
+  const [query, setQuery] = useState<{ keyword: string; kbId?: number }>({ keyword: initialKeyword });
   const [page, setPage] = useState(1);
 
   const kbs = useAsync(() => api.listKbs({ page: 1, size: 50 }));
@@ -34,17 +40,16 @@ function SearchPageInner() {
   // 顶栏全局搜索在本页内再次提交时，同步 URL keyword（组件不重挂载，需监听 searchParams）
   useEffect(() => {
     const kw = searchParams.get("keyword")?.trim() ?? "";
-    setSubmitted((prev) => {
-      if (!kw || kw === prev) return prev;
-      setKeyword(kw);
+    if (kw && kw !== query.keyword) {
+      form.setFieldValue("keyword", kw);
+      setQuery((prev) => ({ keyword: kw, kbId: prev.kbId }));
       setPage(1);
-      return kw;
-    });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
   useEffect(() => {
-    if (!submitted.trim()) {
+    if (!query.keyword.trim()) {
       setResult(null);
       return;
     }
@@ -53,8 +58,8 @@ function SearchPageInner() {
     setError(null);
     api
       .search({
-        keyword: submitted,
-        kbIds: kbFilter ? [Number(kbFilter)] : undefined,
+        keyword: query.keyword,
+        kbIds: query.kbId ? [query.kbId] : undefined,
         page,
         size: 8,
       })
@@ -70,14 +75,16 @@ function SearchPageInner() {
     return () => {
       cancelled = true;
     };
-  }, [submitted, kbFilter, page, retryTick]);
+  }, [query, page, retryTick]);
 
-  const doSearch = () => {
-    const kw = keyword.trim();
+  const onFinish = (values: SearchFormValues) => {
+    const kw = values.keyword?.trim() ?? "";
     setPage(1);
-    setSubmitted(kw);
+    setQuery({ keyword: kw, kbId: values.kbId });
     router.replace(`/search?keyword=${encodeURIComponent(kw)}`);
   };
+
+  const submitted = query.keyword.trim();
 
   return (
     <div className="page">
@@ -88,47 +95,53 @@ function SearchPageInner() {
         </div>
       </div>
 
-      <div className="card">
-        <div className="toolbar">
-          <div className="topbar-search" style={{ flex: 1, maxWidth: "none", display: "flex" }}>
-            <Icon name="search" size={15} />
-            <input
+      <Card>
+        <Form<SearchFormValues> form={form} layout="inline" onFinish={onFinish} initialValues={{ keyword: initialKeyword }}>
+          <Form.Item name="keyword" style={{ flex: 1 }}>
+            <Input
+              prefix={<SearchOutlined />}
               placeholder="输入关键词，支持文件名与正文…"
-              value={keyword}
-              onChange={(e) => setKeyword(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && doSearch()}
-              aria-label="搜索关键词"
+              allowClear
+              onPressEnter={() => form.submit()}
             />
-          </div>
-          <select className="select" value={kbFilter} onChange={(e) => { setKbFilter(e.target.value); setPage(1); }} aria-label="知识库筛选">
-            <option value="">全部知识库</option>
-            {kbs.data?.items.map((kb) => (
-              <option key={kb.id} value={kb.id}>{kb.name}</option>
-            ))}
-          </select>
-          <button className="btn btn-primary" onClick={doSearch} disabled={!keyword.trim()}>
-            搜索
-          </button>
-        </div>
-      </div>
+          </Form.Item>
+          <Form.Item name="kbId">
+            <Select
+              placeholder="全部知识库"
+              allowClear
+              style={{ minWidth: 180 }}
+              options={(kbs.data?.items ?? []).map((kb) => ({ value: kb.id, label: kb.name }))}
+            />
+          </Form.Item>
+          <Form.Item>
+            <Button type="primary" htmlType="submit" disabled={!form.getFieldValue("keyword")}>
+              搜索
+            </Button>
+          </Form.Item>
+        </Form>
+      </Card>
 
       {!submitted ? (
-        <div className="card">
+        <Card>
           <Empty icon="🔍" title="输入关键词开始搜索" desc="支持按知识库过滤；摘要即 view_excerpt 权限面，打开原文需 view_content" />
-        </div>
+        </Card>
       ) : loading ? (
-        <div className="card"><SkeletonRows rows={5} height={72} /></div>
+        <Card>
+          <SkeletonRows rows={5} height={72} />
+        </Card>
       ) : error ? (
-        <div className="card"><ErrorState message={error} onRetry={() => setRetryTick((t) => t + 1)} /></div>
+        <Card>
+          <ErrorState message={error} onRetry={() => setRetryTick((t) => t + 1)} />
+        </Card>
       ) : result && result.items.length === 0 ? (
-        <div className="card">
+        <Card>
           <Empty icon="🧐" title={`没有找到与「${submitted}」相关的内容`} desc="可能无匹配，或相关内容不在你的权限范围内" />
-        </div>
+        </Card>
       ) : (
         <>
           <p style={{ color: "var(--text-2)" }}>共找到 {result?.total ?? 0} 条结果</p>
-          {result?.items.map((item) => (
-            <div key={`${item.documentId}-${item.pageNo}`} className="card card-hover">
+          {(result?.items ?? []).map((item) => (
+            <Card key={`${item.documentId}-${item.pageNo}`} hoverable className="card-hover" style={{ marginBottom: 12 }}>
               <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
                 <span className="file-icon">{item.fileExt}</span>
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -140,11 +153,15 @@ function SearchPageInner() {
                   </div>
                   <p style={{ color: "var(--text-2)" }}>{highlight(item.snippet, submitted)}</p>
                 </div>
-                <Tag color="primary">{(item.score / 20 * 100).toFixed(0)}%</Tag>
+                <Tag color="blue">{(item.score / 20 * 100).toFixed(0)}%</Tag>
               </div>
-            </div>
+            </Card>
           ))}
-          {result ? <Pagination page={page} size={8} total={result.total} onChange={setPage} /> : null}
+          {result ? (
+            <div style={{ display: "flex", justifyContent: "flex-end" }}>
+              <Pagination current={page} pageSize={8} total={result.total} onChange={setPage} showTotal={(t) => `共 ${t} 条结果`} />
+            </div>
+          ) : null}
         </>
       )}
     </div>
@@ -153,7 +170,7 @@ function SearchPageInner() {
 
 export default function SearchPage() {
   return (
-    <Suspense fallback={<div className="card"><SkeletonRows rows={4} /></div>}>
+    <Suspense fallback={<Card><SkeletonRows rows={4} /></Card>}>
       <SearchPageInner />
     </Suspense>
   );
