@@ -1,0 +1,35 @@
+{
+  "version": "1.0",
+  "project": {
+    "name": "rag-knowledge-platform"
+  },
+  "layout": {
+    "backendRoot": "service",
+    "ragEngineRoot": "rag-engine",
+    "frontendRoot": "web",
+    "docsRoot": "docs/modules"
+  },
+  "modules": ["order","user","enterprise-generalization"],
+  "commands": {
+    "backendBuild": "cd service && mvn -B -q -DskipTests package",
+    "backendTest": "cd service && mvn -B -q test",
+    "frontendLint": "cd web && pnpm lint",
+    "frontendTypecheck": "cd web && pnpm typecheck",
+    "frontendTest": "cd web && pnpm test",
+    "ragEngineTest": "cd rag-engine && uv run pytest -q",
+    "ragEngineLint": "cd rag-engine && uv run ruff check ."
+  },
+  "toolchainNote": "backend 命令需要 JDK 21（本机当前仅 JDK 8，见 B1 验证记录）；rag-engine 需要 uv；web 需要 pnpm"
+  "workflow": {
+    "singleApiContract": true,
+    "stageOrder": [
+      "requirements",
+      "design",
+      "api-contract",
+      "backend",
+      "frontend",
+      "test",
+      "delivery"
+    ]
+  }
+}

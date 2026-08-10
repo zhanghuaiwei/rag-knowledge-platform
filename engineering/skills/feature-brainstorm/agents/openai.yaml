@@ -1,0 +1,4 @@
+interface:
+  display_name: "Feature Brainstorm"
+  short_description: "Clarify goals, scope, options, MVP, and unresolved decisions."
+  default_prompt: "帮我先澄清这个需求，比较可行方案并给出 MVP、不做范围、风险和待确认问题。"

@@ -1,0 +1,5 @@
+# pnpm 11 配置：允许这些依赖执行构建脚本。
+# sharp：Next.js 图像优化；unrs-resolver：lint 依赖解析。
+allowBuilds:
+  sharp: true
+  unrs-resolver: true

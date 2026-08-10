@@ -1,0 +1,53 @@
+# --- 安全红线:绝不提交 .env 与密钥 ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.jks
+secrets/
+credentials.json
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+*.swp
+
+# --- IDE / 编辑器 ---
+.idea/
+.vscode/
+*.iml
+
+# --- Java (service) ---
+service/target/
+service/**/target/
+*.class
+*.jar
+!.mvn/wrapper/maven-wrapper.jar
+
+# --- Python (rag-engine) ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# --- Node (web) ---
+node_modules/
+dist/
+.next/
+out/
+coverage/
+*.tsbuildinfo
+
+# --- 本地运行与调试 ---
+*.log
+logs/
+tmp/
+.terraform/
+
+# --- AI 本地工作元数据（.ai/README.md 约定不提交） ---
+.ai/current-role.md

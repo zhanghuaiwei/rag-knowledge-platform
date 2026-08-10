@@ -1,0 +1,20 @@
+spring:
+  application:
+    name: ragkb-service
+
+server:
+  port: 8080
+
+# 探针与运维端点：K8s liveness/readiness 依赖（06-架构方案 §2）
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+# 脚手架阶段无数据库/对象存储连接；业务数据源在对应模块实现时按
+# 04-数据库设计 接入，凭证一律走环境变量，禁止硬编码。

@@ -1,0 +1,31 @@
+{
+  "version": "1.0",
+  "project": "rag-knowledge-platform",
+  "description": "项目内 Skill 注册表。Skill 只封装流程，正式规范以 engineering/rules 和模块契约为准。",
+  "skills": [
+    {
+      "name": "backend-coding-standards",
+      "version": "0.1.0",
+      "status": "candidate",
+      "sourcePath": "engineering/skills/backend-coding-standards"
+    },
+    {
+      "name": "contract-first",
+      "version": "0.1.0",
+      "status": "candidate",
+      "sourcePath": "engineering/skills/contract-first"
+    },
+    {
+      "name": "feature-brainstorm",
+      "version": "0.1.0",
+      "status": "candidate",
+      "sourcePath": "engineering/skills/feature-brainstorm"
+    },
+    {
+      "name": "frontend-coding-standards",
+      "version": "0.1.0",
+      "status": "candidate",
+      "sourcePath": "engineering/skills/frontend-coding-standards"
+    }
+  ]
+}

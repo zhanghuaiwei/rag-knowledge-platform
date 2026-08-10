@@ -1,0 +1,281 @@
+openapi: 3.0.3
+info:
+  title: 企业级 RAG 知识库平台 — server ↔ rag-engine 内部 API
+  version: 0.1.0
+  description: 仅 server 可调用（集群内网），不做用户级鉴权。以本文件为准，与 07-API契约.md §3 双轨同步。
+servers:
+  - url: http://rag-engine.ragkb.svc:8000
+components:
+  schemas:
+    KbConfig:
+      type: object
+      properties:
+        embeddingModel: { type: string, default: bge-m3 }
+        chunkSize: { type: integer, default: 512 }
+        chunkOverlap: { type: integer, default: 50 }
+        topK: { type: integer, default: 5 }
+        rerankerEnabled: { type: boolean, default: true }
+    IngestRequest:
+      type: object
+      required: [documentId, objectKey, kbConfig, tenantId]
+      properties:
+        documentId: { type: integer }
+        objectKey: { type: string }
+        kbConfig: { $ref: "#/components/schemas/KbConfig" }
+        tenantId: { type: integer }
+        kbId: { type: integer }
+        versionNo: { type: integer, default: 1 }
+    IngestTaskStatus:
+      type: object
+      properties:
+        taskId: { type: string }
+        stage: { type: string, enum: [PARSING, SPLITTING, EMBEDDING, DONE] }
+        status: { type: string, enum: [RUNNING, SUCCESS, FAILED] }
+        vectorCount: { type: integer }
+        errorMsg: { type: string, nullable: true }
+    DeleteRequest:
+      type: object
+      required: [documentId]
+      properties:
+        documentId: { type: integer }
+        versionNo: { type: integer, nullable: true }
+    QueryChatRequest:
+      type: object
+      required: [requestId, kbIds, question]
+      properties:
+        requestId: { type: string }
+        sessionId: { type: integer, nullable: true }
+        kbIds: { type: array, items: { type: integer } }
+        question: { type: string }
+        history:
+          type: array
+          items:
+            type: object
+            properties:
+              role: { type: string, enum: [user, assistant] }
+              content: { type: string }
+        kbConfig: { $ref: "#/components/schemas/KbConfig" }
+    RerankRequest:
+      type: object
+      required: [requestId, query, candidates]
+      properties:
+        requestId: { type: string }
+        query: { type: string }
+        topN: { type: integer, default: 10 }
+        candidates:
+          type: array
+          items:
+            type: object
+            properties:
+              chunkId: { type: string }
+              text: { type: string }
+    RerankResult:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              chunkId: { type: string }
+              score: { type: number }
+    EngineHealth:
+      type: object
+      properties:
+        status: { type: string, enum: [ok, degraded, down] }
+        models:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              available: { type: boolean }
+    RouteStatusRequest:
+      type: object
+      required: [routeType, modelName]
+      properties:
+        routeType: { type: string, enum: [embedding, llm] }
+        modelName: { type: string }
+    RouteStatus:
+      type: object
+      properties:
+        available: { type: boolean }
+        latencyMs: { type: integer }
+    SearchRequest:
+      type: object
+      required: [requestId, keyword]
+      properties:
+        requestId: { type: string }
+        keyword: { type: string }
+        kbIds: { type: array, items: { type: integer } }
+        docIdWhitelist: { type: array, items: { type: integer } }
+        types: { type: array, items: { type: string } }
+        dateFrom: { type: string, format: date }
+        dateTo: { type: string, format: date }
+        page: { type: integer, default: 1 }
+        size: { type: integer, default: 20 }
+        vectorFusion: { type: boolean, default: false }
+    SearchResultPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              documentId: { type: integer }
+              fileName: { type: string }
+              kbId: { type: integer }
+              pageNo: { type: integer }
+              sectionTitle: { type: string }
+              fileExt: { type: string }
+              snippet: { type: string }
+              score: { type: number }
+        total: { type: integer }
+        page: { type: integer }
+        size: { type: integer }
+        hasMore: { type: boolean }
+paths:
+  /api/ingest/documents:
+    post:
+      summary: 触发文档解析（异步）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/IngestRequest" }
+      responses:
+        "202":
+          description: 已接收
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  taskId: { type: string }
+        "400":
+          description: 参数不合法
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: string }
+                  message: { type: string }
+        "503":
+          description: 引擎不可用
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: string, example: "E-4003" }
+                  message: { type: string }
+  /api/ingest/tasks/{id}:
+    get:
+      summary: 查询解析任务状态
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: 任务状态
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IngestTaskStatus" }
+        "404":
+          description: 任务不存在
+  /api/ingest/delete:
+    post:
+      summary: 删除文档向量（幂等）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DeleteRequest" }
+      responses:
+        "200":
+          description: 已删除
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deletedCount: { type: integer }
+  /api/query/chat:
+    post:
+      summary: 混合检索问答（SSE 流式）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QueryChatRequest" }
+      responses:
+        "200":
+          description: text/event-stream（事件协议见 07-API契约.md §5）
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "400":
+          description: 参数不合法
+        "503":
+          description: 模型/引擎不可用
+  /api/query/search:
+    post:
+      summary: 全文搜索（BM25 为主，F2.9）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SearchRequest" }
+      responses:
+        "200":
+          description: 分页搜索结果（snippet 含 <mark> 高亮）
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SearchResultPage" }
+        "400":
+          description: 参数不合法
+  /api/query/rerank:
+    post:
+      summary: 精排（Reranker）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RerankRequest" }
+      responses:
+        "200":
+          description: 精排结果
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RerankResult" }
+  /api/engine/health:
+    get:
+      summary: 引擎健康检查（供探针与路由缓存）
+      responses:
+        "200":
+          description: 健康状态
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EngineHealth" }
+        "503":
+          description: 引擎不可用
+  /api/engine/route-status:
+    post:
+      summary: 探测指定模型可用性（路由决策）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RouteStatusRequest" }
+      responses:
+        "200":
+          description: 可用性
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RouteStatus" }
+        "400":
+          description: 参数不合法

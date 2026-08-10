@@ -1,0 +1,4 @@
+interface:
+  display_name: "Backend Coding Standards"
+  short_description: "Implement or review backend work under repository rules."
+  default_prompt: "按项目后端规则和唯一 API 契约完成这项后端任务，并执行聚焦验证。"

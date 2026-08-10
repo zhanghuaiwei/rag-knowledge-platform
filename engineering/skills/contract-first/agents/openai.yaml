@@ -1,0 +1,4 @@
+interface:
+  display_name: "Contract First"
+  short_description: "Align requirements, API fields, tasks, tests, and ownership."
+  default_prompt: "帮我按契约优先检查需求和前后端任务，列出字段、枚举、分页、错误码和待确认问题。"

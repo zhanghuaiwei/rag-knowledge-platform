@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+
+jobs:
+  rag-engine:
+    name: rag-engine (lint + test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Sync deps
+        run: cd rag-engine && uv sync
+      - name: Test
+        run: cd rag-engine && uv run pytest -q
+      - name: Lint
+        run: cd rag-engine && uv run ruff check .
+
+  web:
+    name: web (typecheck + lint + test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - name: Install
+        run: cd web && pnpm install --frozen-lockfile
+      - name: Typecheck
+        run: cd web && pnpm typecheck
+      - name: Lint
+        run: cd web && pnpm lint
+      - name: Test
+        run: cd web && pnpm test
+
+  service:
+    name: service (build + test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: maven
+      - name: Test
+        run: cd service && mvn -B -q test
+
+  openapi-contract:
+    name: OpenAPI 契约校验
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Validate OpenAPI structure
+        run: |
+          cd rag-engine && uv run --with pyyaml python3 - <<'EOF'
+          import yaml
+          import sys
+
+          # server：v0.2 草稿，所有操作必须定义 responses
+          server = yaml.safe_load(open("../docs/api/server.openapi.yaml"))
+          assert "paths" in server and "components" in server, "server.openapi.yaml 缺 paths/components"
+          assert "responses" in server["components"], "server.openapi.yaml 缺 components.responses"
+          for p, ops in server["paths"].items():
+              for m, op in ops.items():
+                  if m == "parameters":
+                      continue
+                  assert "responses" in op, f"server: {m.upper()} {p} 缺 responses"
+          print(f"server.openapi.yaml OK: {len(server['paths'])} paths")
+
+          # rag-engine：仍为 v0.1，仅校验可解析与基本结构
+          engine = yaml.safe_load(open("../docs/api/rag-engine.openapi.yaml"))
+          assert "paths" in engine, "rag-engine.openapi.yaml 缺 paths"
+          print(f"rag-engine.openapi.yaml OK: {len(engine['paths'])} paths")
+          EOF

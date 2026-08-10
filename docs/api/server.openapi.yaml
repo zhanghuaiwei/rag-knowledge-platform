@@ -1,0 +1,2312 @@
+openapi: 3.0.3
+info:
+  title: 通用企业知识库平台 — web ↔ server API（v0.2 草稿）
+  version: 0.2.0-draft
+  description: |
+    机器可读权威契约。**状态：评审中，未冻结**。本文件取代 v0.1 版本并覆盖 v0.2 设计能力；
+    尚未覆盖的字段以 `TBD(评审确认)` 标注，不得据此生成生产代码。
+    设计依据：docs/02-概要设计.md、docs/03-详细设计.md §16、docs/modules/enterprise-generalization/requirements。
+servers:
+  - url: https://api.ragkb.example.com
+security:
+  - oidcSession: []
+tags:
+  - name: auth
+    description: OIDC/BFF 登录、会话、租户切换
+  - name: api-keys
+    description: scoped API Key（机器访问）
+  - name: knowledge-bases
+    description: 知识库、成员、克隆、索引构建
+  - name: documents
+    description: 文档、版本、上传、预览、下载、ACL、删除
+  - name: connectors
+    description: 内容源连接器与同步任务
+  - name: governance
+    description: 元数据 schema、审核、保留、法律保全、删除证明
+  - name: search-chat
+    description: 搜索、问答会话与引用
+  - name: analytics
+    description: 用量、成本、健康度、导出
+  - name: audit
+    description: 审计日志
+  - name: integration
+    description: Webhook 订阅与投递、组织
+
+components:
+  securitySchemes:
+    oidcSession:
+      type: apiKey
+      in: cookie
+      name: ragkb_session
+      description: BFF 设置的 Secure/HttpOnly/SameSite 会话 cookie；浏览器不保存长期 token（02-概要 §4.1）。
+    apiKeyAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: ApiKey
+      description: '机器访问；格式 `Authorization: Bearer <apikey>`，scope 限制于 key 本身。'
+    oidc:
+      type: oauth2
+      flows:
+        authorizationCode:
+          authorizationUrl: https://idp.example.com/authorize
+          tokenUrl: https://idp.example.com/token
+          scopes:
+            openid: OpenID Connect
+            profile: 用户基础资料
+            email: 邮箱
+
+  parameters:
+    page:
+      name: page
+      in: query
+      description: 页号（从 1 开始）
+      schema: { type: integer, minimum: 1, default: 1 }
+    size:
+      name: size
+      in: query
+      description: 每页条数
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+    cursor:
+      name: cursor
+      in: query
+      description: 游标分页；来自上一响应 `nextCursor`
+      schema: { type: string }
+    kbPath:
+      name: kbId
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+    docPath:
+      name: documentId
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+    idempotencyKey:
+      name: Idempotency-Key
+      in: header
+      description: 幂等键，写操作必填；同一键 + 相同请求摘要返回原结果，不同摘要返回 409
+      schema: { type: string, maxLength: 128 }
+    requestId:
+      name: X-Request-Id
+      in: header
+      description: 客户端透传的请求 ID；服务端若缺失则生成并随响应返回
+      schema: { type: string }
+
+  schemas:
+    ApiResponse:
+      type: object
+      required: [code, message, data]
+      properties:
+        code: { type: string, example: "0" }
+        message: { type: string }
+        data: {}
+    Error:
+      type: object
+      required: [code, message, requestId, timestamp]
+      properties:
+        code: { type: string, example: "E-1003" }
+        message: { type: string }
+        requestId: { type: string }
+        timestamp: { type: string, format: date-time }
+        details: { type: object, nullable: true }
+    PageData:
+      type: object
+      properties:
+        items: { type: array, items: {} }
+        total: { type: integer }
+        page: { type: integer }
+        size: { type: integer }
+        hasMore: { type: boolean }
+    CursorPageData:
+      type: object
+      properties:
+        items: { type: array, items: {} }
+        nextCursor: { type: string, nullable: true }
+        hasMore: { type: boolean }
+    Task:
+      type: object
+      properties:
+        taskId: { type: string }
+        type: { type: string, description: "如 INDEX_BUILD / CLONE / DELETION / SYNC / PARSE" }
+        status: { type: string, enum: [QUEUED, RUNNING, SUCCEEDED, FAILED, PARTIAL, CANCELLED] }
+        progressPercent: { type: integer, minimum: 0, maximum: 100 }
+        errorCode: { type: string, nullable: true }
+        errorMessage: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    IdempotencyAck:
+      type: object
+      properties:
+        replayed: { type: boolean, description: "true 表示本次为幂等重放，返回原结果" }
+        originalTaskId: { type: string, nullable: true }
+    TenantContext:
+      type: object
+      description: 当前激活租户（由服务端从已验证身份推导，不信任客户端自报）
+      properties:
+        tenantId: { type: integer, format: int64 }
+        tenantCode: { type: string }
+        tenantRole: { type: string, enum: [TENANT_ADMIN, SECURITY_ADMIN, KNOWLEDGE_ADMIN, AUDITOR, MEMBER] }
+    AuthSession:
+      type: object
+      description: 当前登录用户会话概览
+      properties:
+        userId: { type: integer, format: int64 }
+        subjectKey: { type: string, description: "issuer + subject 映射键" }
+        displayName: { type: string }
+        activeTenant: { $ref: "#/components/schemas/TenantContext" }
+        tenants:
+          type: array
+          items: { $ref: "#/components/schemas/TenantContext" }
+        scopes: { type: array, items: { type: string } }
+    ApiKey:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        prefix: { type: string, description: "仅返回前缀，明文只出现一次" }
+        scopes: { type: array, items: { type: string } }
+        allowedKbIds: { type: array, items: { type: integer }, nullable: true, description: "null 表示不限 KB" }
+        expiresAt: { type: string, format: date-time, nullable: true }
+        lastUsedAt: { type: string, format: date-time, nullable: true }
+        revokedAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+    ApiKeyCreateRequest:
+      type: object
+      required: [name, scopes]
+      properties:
+        name: { type: string, maxLength: 128 }
+        scopes: { type: array, items: { type: string }, minItems: 1 }
+        allowedKbIds: { type: array, items: { type: integer }, nullable: true }
+        expiresAt: { type: string, format: date-time, nullable: true }
+    ApiKeyCreated:
+      allOf:
+        - { $ref: "#/components/schemas/ApiKey" }
+        - type: object
+          properties:
+            plaintext: { type: string, description: "明文 Key，仅此一次返回；服务端只存 HMAC digest" }
+    Kb:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        description: { type: string, nullable: true }
+        visibility: { type: string, enum: [PRIVATE, TENANT] }
+        status: { type: string, enum: [ACTIVE, ARCHIVED, DELETING, DELETED] }
+        dataRegion: { type: string, description: "创建时继承租户区域（C7 决策）" }
+        indexProfileId: { type: integer, format: int64 }
+        metadataSchemaId: { type: integer, format: int64, nullable: true }
+        retentionPolicyId: { type: integer, format: int64, nullable: true }
+        requiresReview: { type: boolean }
+        ocrEnabled: { type: boolean }
+        activeIndexBuildId: { type: integer, format: int64, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    KbCreateRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, maxLength: 128 }
+        description: { type: string, maxLength: 1024 }
+        visibility: { type: string, enum: [PRIVATE, TENANT], default: PRIVATE }
+        indexProfileId: { type: integer, format: int64, description: "必须指向 ACTIVE 的不可变 index profile" }
+        metadataSchemaId: { type: integer, format: int64, nullable: true }
+        retentionPolicyId: { type: integer, format: int64, nullable: true }
+        requiresReview: { type: boolean, default: true }
+        ocrEnabled: { type: boolean, default: true }
+        dataRegion: { type: string, description: "缺省继承租户；一经创建不可改" }
+    KbUpdateRequest:
+      type: object
+      properties:
+        name: { type: string, maxLength: 128 }
+        description: { type: string, maxLength: 1024 }
+        visibility: { type: string, enum: [PRIVATE, TENANT] }
+        indexProfileId: { type: integer, format: int64, description: "变更将触发新 index build + alias 切换" }
+        requiresReview: { type: boolean }
+        ocrEnabled: { type: boolean }
+    KbMember:
+      type: object
+      properties:
+        userId: { type: integer, format: int64 }
+        displayName: { type: string }
+        role: { type: string, enum: [OWNER, EDITOR, VIEWER] }
+        joinedAt: { type: string, format: date-time }
+    KbMemberRequest:
+      type: object
+      required: [userId, role]
+      properties:
+        userId: { type: integer, format: int64 }
+        role: { type: string, enum: [OWNER, EDITOR, VIEWER] }
+    IndexBuild:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        profileVersion: { type: integer }
+        status: { type: string, enum: [QUEUED, BUILDING, VALIDATING, READY, PUBLISHED, FAILED, RETIRED] }
+        inputDocuments: { type: integer }
+        chunkCount: { type: integer }
+        failedCount: { type: integer }
+        qualityGate: { type: object, nullable: true }
+        errorCode: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+        publishedAt: { type: string, format: date-time, nullable: true }
+    DocumentSummary:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        kbId: { type: integer, format: int64 }
+        title: { type: string }
+        fileName: { type: string, nullable: true }
+        fileExt: { type: string, nullable: true }
+        sourceType: { type: string, enum: [UPLOAD, CONNECTOR] }
+        sensitivity: { type: string, enum: [PUBLIC, INTERNAL, CONFIDENTIAL, RESTRICTED] }
+        lifecycleStatus: { type: string, enum: [ACTIVE, ARCHIVED, DELETING, DELETED] }
+        reviewStatus: { type: string, enum: [DRAFT, PENDING_REVIEW, PUBLISHED, REJECTED, WITHDRAWN] }
+        versionId: { type: integer, format: int64, nullable: true }
+        ingestStatus: { type: string, nullable: true }
+        updatedAt: { type: string, format: date-time }
+    DocumentDetail:
+      allOf:
+        - { $ref: "#/components/schemas/DocumentSummary" }
+        - type: object
+          properties:
+            dataRegion: { type: string, nullable: true, description: "覆盖 KB 区域；null 继承 KB" }
+            ownerUserId: { type: integer, format: int64, nullable: true }
+            validFrom: { type: string, format: date-time, nullable: true }
+            validUntil: { type: string, format: date-time, nullable: true }
+            reviewDueAt: { type: string, format: date-time, nullable: true }
+            sourceUri: { type: string, nullable: true }
+    DocumentVersion:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        versionNo: { type: integer }
+        isCurrent: { type: boolean }
+        ingestStatus: { type: string }
+        safetyStatus: { type: string, enum: [PENDING, PASSED, BLOCKED, FAILED] }
+        mimeType: { type: string }
+        sizeBytes: { type: integer }
+        sha256: { type: string }
+        createdAt: { type: string, format: date-time }
+    UploadInitRequest:
+      type: object
+      required: [kbId, fileName, fileSize]
+      properties:
+        kbId: { type: integer, format: int64 }
+        fileName: { type: string, maxLength: 256 }
+        fileSize: { type: integer, minimum: 1 }
+        mimeType: { type: string, nullable: true }
+        sha256: { type: string, nullable: true, description: "客户端预计算，仅优化秒传；完成时服务端重算" }
+        idempotencyKey: { type: string, description: "同文件重复上传返回同一 uploadId" }
+    UploadInitResponse:
+      type: object
+      properties:
+        uploadId: { type: string }
+        partSize: { type: integer, description: "分片大小（字节），0 表示直传" }
+        partCount: { type: integer }
+        uploadedParts: { type: array, items: { type: integer }, description: "已上传分片号，用于断点续传" }
+        presignedPutUrls: { type: array, items: { type: string }, nullable: true }
+    AclEntry:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        principalType: { type: string, enum: [USER, ORG, TENANT_ROLE, KB_ROLE] }
+        principalId: { type: integer, format: int64 }
+        principalName: { type: string }
+        permission: { type: string, enum: [VIEW_EXCERPT, VIEW_CONTENT, DOWNLOAD_ORIGINAL] }
+    AclSetRequest:
+      type: object
+      properties:
+        entries:
+          type: array
+          items:
+            type: object
+            required: [principalType, principalId, permission]
+            properties:
+              principalType: { type: string, enum: [USER, ORG, TENANT_ROLE, KB_ROLE] }
+              principalId: { type: integer, format: int64 }
+              permission: { type: string, enum: [VIEW_EXCERPT, VIEW_CONTENT, DOWNLOAD_ORIGINAL] }
+    Connector:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        providerKey: { type: string, description: "如 UPLOAD / S3 / SHAREPOINT / CONFLUENCE / WEB" }
+        status: { type: string, enum: [ACTIVE, DISABLED, ERROR] }
+        capabilities: { type: object, nullable: true }
+        lastSyncAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+    ConnectorCreateRequest:
+      type: object
+      required: [name, providerKey]
+      properties:
+        name: { type: string, maxLength: 128 }
+        providerKey: { type: string }
+        config: { type: object, description: "provider 专属配置；secret 字段只接受 SecretRef，禁止明文" }
+        enabled: { type: boolean, default: true }
+    ConnectorValidateRequest:
+      type: object
+      required: [providerKey, config]
+      properties:
+        providerKey: { type: string }
+        config: { type: object }
+    ConnectorValidateResult:
+      type: object
+      properties:
+        ok: { type: boolean }
+        message: { type: string, nullable: true }
+    SyncJob:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        connectionId: { type: integer, format: int64 }
+        syncType: { type: string, enum: [FULL, INCREMENTAL, WEBHOOK, RECONCILE] }
+        status: { type: string, enum: [QUEUED, RUNNING, PARTIAL, SUCCEEDED, FAILED, CANCELLED] }
+        discovered: { type: integer }
+        failedObjects: { type: array, items: { type: string }, nullable: true }
+        lastSuccessAt: { type: string, format: date-time, nullable: true }
+        errorCode: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+    MetadataSchema:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        currentVersion: { type: integer }
+        schema: { type: object, description: "受控 JSON Schema 子集；发布后版本不可变" }
+        status: { type: string, enum: [DRAFT, PUBLISHED] }
+        createdAt: { type: string, format: date-time }
+    Review:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        documentId: { type: integer, format: int64 }
+        documentVersionId: { type: integer, format: int64 }
+        action: { type: string, enum: [SUBMIT, APPROVE, REJECT, WITHDRAW] }
+        actor: { type: integer, format: int64 }
+        comment: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+    ReviewActionRequest:
+      type: object
+      properties:
+        comment: { type: string, maxLength: 2048 }
+    RetentionPolicy:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        match: { type: object, description: "按 tenant/KB/classification 匹配规则" }
+        retentionDays: { type: integer }
+        onExpire: { type: string, enum: [ARCHIVE, REVIEW, DELETE] }
+        createdAt: { type: string, format: date-time }
+    LegalHold:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        reason: { type: string }
+        status: { type: string, enum: [ACTIVE, RELEASED] }
+        documentIds: { type: array, items: { type: integer } }
+        createdAt: { type: string, format: date-time }
+    DeletionTask:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        documentId: { type: integer, format: int64 }
+        status: { type: string, enum: [QUEUED, RUNNING, SUCCEEDED, FAILED] }
+        preview: { type: object, nullable: true }
+        receiptId: { type: string, nullable: true }
+        errorCode: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+    DeletionReceipt:
+      type: object
+      properties:
+        id: { type: string }
+        documentId: { type: integer, format: int64 }
+        targets:
+          type: array
+          items:
+            type: object
+            properties:
+              target: { type: string, description: "OBJECT / CHUNK / INDEX / CACHE / PREVIEW / BACKUP_EXCEPTION" }
+              status: { type: string }
+              checksum: { type: string, nullable: true }
+              completedAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+    SearchHit:
+      type: object
+      properties:
+        documentId: { type: integer, format: int64 }
+        documentVersionId: { type: integer, format: int64 }
+        kbId: { type: integer, format: int64 }
+        title: { type: string }
+        highlight: { type: string, description: "净化后的高亮片段（结构化 range，非原始 HTML）" }
+        location: { type: object, nullable: true }
+        score: { type: number }
+        updatedAt: { type: string, format: date-time }
+    SearchRequest:
+      type: object
+      required: [q]
+      properties:
+        q: { type: string, maxLength: 512 }
+        kbIds: { type: array, items: { type: integer }, nullable: true, description: "null/空 = 授权范围内全部 KB" }
+        fileExts: { type: array, items: { type: string }, nullable: true }
+        sensitivity: { type: array, items: { type: string }, nullable: true }
+        dateFrom: { type: string, format: date, nullable: true }
+        dateTo: { type: string, format: date, nullable: true }
+        cursor: { type: string, nullable: true }
+        size: { type: integer, default: 20, maximum: 100 }
+    ChatSession:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        title: { type: string, nullable: true }
+        kbIds: { type: array, items: { type: integer } }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    ChatSessionCreateRequest:
+      type: object
+      required: [kbIds]
+      properties:
+        kbIds:
+          type: array
+          items: { type: integer }
+          minItems: 1
+          maxItems: 5
+        title: { type: string, maxLength: 128 }
+    ChatMessage:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        sessionId: { type: integer, format: int64 }
+        role: { type: string, enum: [user, assistant, system] }
+        content: { type: string }
+        status: { type: string, enum: [COMPLETED, CANCELLED, ERROR, REFUSED] }
+        confidence: { type: number, nullable: true }
+        refusalReason: { type: string, nullable: true }
+        modelInfo: { type: object, nullable: true }
+        createdAt: { type: string, format: date-time }
+    ChatAskRequest:
+      type: object
+      required: [question]
+      properties:
+        question: { type: string, maxLength: 4096 }
+        memoryTurns: { type: integer, minimum: 1, maximum: 20, default: 10 }
+        stream: { type: boolean, default: true, description: "true 走 SSE；false 返回最终结果" }
+    ChatSource:
+      type: object
+      properties:
+        sourceId: { type: string }
+        messageId: { type: integer, format: int64 }
+        documentId: { type: integer, format: int64 }
+        documentVersionId: { type: integer, format: int64 }
+        title: { type: string }
+        location: { type: object, nullable: true }
+        rank: { type: integer }
+        score: { type: number }
+    FeedbackRequest:
+      type: object
+      required: [reaction]
+      properties:
+        reaction: { type: string, enum: [up, down] }
+        reason: { type: string, maxLength: 2048, nullable: true, description: "down 时建议填写" }
+    UsageReport:
+      type: object
+      properties:
+        period: { type: string, enum: [DAY, WEEK, MONTH] }
+        qaCount: { type: integer }
+        noAnswerCount: { type: integer }
+        lowConfidenceCount: { type: integer }
+        activeUsers: { type: integer }
+        topDocuments: { type: array, items: { type: object }, nullable: true }
+    CostReport:
+      type: object
+      properties:
+        period: { type: string, enum: [DAY, WEEK, MONTH] }
+        byModel: { type: array, items: { type: object }, nullable: true }
+        totalTokens: { type: integer }
+        totalCost: { type: number, format: decimal }
+    AuditLogEntry:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        actorType: { type: string, enum: [USER, API_KEY, SERVICE] }
+        action: { type: string }
+        resourceType: { type: string }
+        resourceId: { type: string }
+        result: { type: string, enum: [SUCCESS, FAILURE, BLOCKED] }
+        requestId: { type: string }
+        occurredAt: { type: string, format: date-time }
+        detail: { type: object, nullable: true, description: "脱敏；禁止保存原文/密钥/token" }
+    WebhookSubscription:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        url: { type: string }
+        events: { type: array, items: { type: string } }
+        status: { type: string, enum: [ACTIVE, DISABLED] }
+        createdAt: { type: string, format: date-time }
+    WebhookSubscriptionRequest:
+      type: object
+      required: [url, events]
+      properties:
+        url: { type: string, description: "必须 https；经 SSRF 防护" }
+        events: { type: array, items: { type: string }, minItems: 1 }
+        secretRef: { type: string, description: "签名密钥引用，禁止明文" }
+    WebhookDelivery:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        subscriptionId: { type: integer, format: int64 }
+        eventId: { type: string }
+        status: { type: string, enum: [PENDING, SENDING, SUCCEEDED, RETRY, DEAD] }
+        attempts: { type: integer }
+        nextRetryAt: { type: string, format: date-time, nullable: true }
+        responseSummary: { type: string, nullable: true }
+    Org:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        parentId: { type: integer, format: int64, nullable: true }
+        memberCount: { type: integer }
+    OrgCreateRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, maxLength: 128 }
+        parentId: { type: integer, format: int64, nullable: true }
+
+  responses:
+    BadRequest:
+      description: 参数/字段/状态不合法（400）
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Unauthenticated:
+      description: 未认证或凭证失效（401）
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Forbidden:
+      description: 无权限/被排除（403；防止枚举时返回 404）
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: 资源不存在或不可见（404）
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Conflict:
+      description: 并发/状态机/幂等冲突（409）
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    QuotaExceeded:
+      description: 配额超限（413/429）
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    SafetyBlocked:
+      description: 内容安全阻断（422；如恶意文件/DLP 命中）
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+paths:
+  /api/v1/auth/authorize:
+    get:
+      tags: [auth]
+      summary: 发起 OIDC Authorization Code + PKCE 登录（BFF 重定向到 IdP）
+      security: []
+      parameters:
+        - name: returnTo
+          in: query
+          schema: { type: string }
+          description: 登录成功回跳路径
+      responses:
+        "302":
+          description: 重定向到 IdP /authorize?state=..&nonce=..&code_challenge=..
+        "400":
+          $ref: "#/components/responses/BadRequest"
+  /api/v1/auth/callback:
+    get:
+      tags: [auth]
+      summary: OIDC 回调：校验 state/nonce，换取并签发 BFF 会话
+      security: []
+      parameters:
+        - name: code
+          in: query
+          required: true
+          schema: { type: string }
+        - name: state
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "302":
+          description: 设置 Secure/HttpOnly/SameSite 会话 cookie 后回跳 returnTo
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+  /api/v1/auth/session:
+    get:
+      tags: [auth]
+      summary: 当前会话与可切换租户列表
+      responses:
+        "200":
+          description: 会话信息
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/AuthSession" }
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+  /api/v1/auth/logout:
+    post:
+      tags: [auth]
+      summary: 登出，作废会话与刷新凭证
+      responses:
+        "204":
+          description: 成功登出
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+  /api/v1/auth/tenant/switch:
+    post:
+      tags: [auth]
+      summary: 切换当前激活租户（仅限当前用户已加入的租户）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tenantId]
+              properties:
+                tenantId: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: 新会话上下文
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/AuthSession" }
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/api-keys:
+    get:
+      tags: [api-keys]
+      summary: 列表（不含明文）
+      security:
+        - oidcSession: []
+      responses:
+        "200":
+          description: API Key 列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/ApiKey" }
+    post:
+      tags: [api-keys]
+      summary: 创建 scoped API Key（明文仅此一次返回）
+      security:
+        - oidcSession: []
+      parameters:
+        - { $ref: "#/components/parameters/idempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ApiKeyCreateRequest" }
+      responses:
+        "201":
+          description: 创建成功，返回含明文
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/ApiKeyCreated" }
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/api-keys/{keyId}:
+    parameters:
+      - name: keyId
+        in: path
+        required: true
+        schema: { type: integer, format: int64 }
+    get:
+      tags: [api-keys]
+      summary: 详情
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/ApiKey" }
+    delete:
+      tags: [api-keys]
+      summary: 吊销（立即失效并清理授权缓存）
+      responses:
+        "204":
+          description: 已吊销
+  /api/v1/api-keys/{keyId}/rotate:
+    post:
+      tags: [api-keys]
+      summary: 轮换：旧 key 短时保留，返回新明文
+      parameters:
+        - { $ref: "#/components/parameters/idempotencyKey" }
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/ApiKeyCreated" }
+
+  /api/v1/kbs:
+    get:
+      tags: [knowledge-bases]
+      summary: 当前用户可访问的知识库列表（分页）
+      parameters:
+        - { $ref: "#/components/parameters/page" }
+        - { $ref: "#/components/parameters/size" }
+      responses:
+        "200":
+          description: 知识库分页
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/PageData" }
+    post:
+      tags: [knowledge-bases]
+      summary: 创建知识库
+      parameters:
+        - { $ref: "#/components/parameters/idempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/KbCreateRequest" }
+      responses:
+        "201":
+          description: 创建成功（创建者为 OWNER）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/Kb" }
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /api/v1/kbs/{kbId}:
+    parameters:
+      - { $ref: "#/components/parameters/kbPath" }
+    get:
+      tags: [knowledge-bases]
+      summary: 知识库详情
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/Kb" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      tags: [knowledge-bases]
+      summary: 更新知识库配置
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/KbUpdateRequest" }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/Kb" }
+        "409":
+          $ref: "#/components/responses/Conflict"
+    delete:
+      tags: [knowledge-bases]
+      summary: 软删除知识库（DELETING → 异步处置）
+      parameters:
+        - { $ref: "#/components/parameters/idempotencyKey" }
+      responses:
+        "202":
+          description: 已接受删除，返回处置任务
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/Task" }
+  /api/v1/kbs/{kbId}/clone:
+    post:
+      tags: [knowledge-bases]
+      summary: 异步克隆知识库（配置/ACL 策略复制，文档重建索引）
+      parameters:
+        - { $ref: "#/components/parameters/idempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, maxLength: 128 }
+      responses:
+        "202":
+          description: 克隆任务已创建
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/Task" }
+  /api/v1/kbs/{kbId}/members:
+    get:
+      tags: [knowledge-bases]
+      summary: 成员列表
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/KbMember" }
+    post:
+      tags: [knowledge-bases]
+      summary: 添加/更新成员角色
+      parameters:
+        - { $ref: "#/components/parameters/idempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/KbMemberRequest" }
+      responses:
+        "200":
+          description: 成员已加入或角色已更新（触发策略版本增长）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/KbMember" }
+  /api/v1/kbs/{kbId}/members/{userId}:
+    parameters:
+      - { $ref: "#/components/parameters/kbPath" }
+      - name: userId
+        in: path
+        required: true
+        schema: { type: integer, format: int64 }
+    delete:
+      tags: [knowledge-bases]
+      summary: 移除成员（立即收紧权限，索引异步收敛不得放权）
+      responses:
+        "204":
+          description: 已移除
+  /api/v1/kbs/{kbId}/index-builds:
+    get:
+      tags: [knowledge-bases]
+      summary: 索引构建历史
+      parameters:
+        - { $ref: "#/components/parameters/page" }
+        - { $ref: "#/components/parameters/size" }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/IndexBuild" }
+    post:
+      tags: [knowledge-bases]
+      summary: 触发全量重建（新 profile/换模时使用；alias 验证后才原子切换）
+      parameters:
+        - { $ref: "#/components/parameters/idempotencyKey" }
+      responses:
+        "202":
+          description: 索引构建任务已创建
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/Task" }
+  /api/v1/index-builds/{buildId}:
+    parameters:
+      - name: buildId
+        in: path
+        required: true
+        schema: { type: integer, format: int64 }
+    get:
+      tags: [knowledge-bases]
+      summary: 索引构建状态
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/IndexBuild" }
+
+  /api/v1/kbs/{kbId}/documents:
+    get:
+      tags: [documents]
+      summary: 文档列表（含过滤）
+      parameters:
+        - { $ref: "#/components/parameters/page" }
+        - { $ref: "#/components/parameters/size" }
+        - name: reviewStatus
+          in: query
+          schema: { type: string, enum: [DRAFT, PENDING_REVIEW, PUBLISHED, REJECTED, WITHDRAWN] }
+        - name: ingestStatus
+          in: query
+          schema: { type: string }
+        - name: sensitivity
+          in: query
+          schema: { type: string }
+        - name: tag
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/PageData" }
+  /api/v1/documents/{documentId}:
+    parameters:
+      - { $ref: "#/components/parameters/docPath" }
+    get:
+      tags: [documents]
+      summary: 文档详情（含治理状态）
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/DocumentDetail" }
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/v1/documents/{documentId}/versions:
+    get:
+      tags: [documents]
+      summary: 版本列表（时间倒序，含当前版本标记）
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/DocumentVersion" }
+  /api/v1/documents/{documentId}/excerpt:
+    get:
+      tags: [documents]
+      summary: 引用摘要（VIEW_EXCERPT）
+      parameters:
+        - name: sourceId
+          in: query
+          required: true
+          schema: { type: string }
+        - name: atVersionId
+          in: query
+          schema: { type: integer, format: int64, description: "指定版本；缺省当前版本" }
+      responses:
+        "200":
+          description: 净化后的短文本与定位
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          excerpt: { type: string }
+                          location: { type: object, nullable: true }
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/documents/{documentId}/preview:
+    get:
+      tags: [documents]
+      summary: 在线预览（VIEW_CONTENT），大文件支持 Range
+      responses:
+        "200":
+          description: 安全渲染产物或原文流
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        "206":
+          description: 部分内容（Range 请求）
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/documents/{documentId}/download:
+    get:
+      tags: [documents]
+      summary: 下载原文（DOWNLOAD_ORIGINAL）
+      parameters:
+        - name: versionId
+          in: query
+          schema: { type: integer, format: int64 }
+        - name: Range
+          in: header
+          schema: { type: string }
+      responses:
+        "200":
+          description: 原始字节流；Content-Disposition attachment
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/documents/{documentId}/acl:
+    get:
+      tags: [documents]
+      summary: 文档 ACL 列表（allow-list）
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/AclEntry" }
+    put:
+      tags: [documents]
+      summary: 整体替换 ACL（覆盖 KB 继承；空数组 = 无 ACL，回退 KB 权限）
+      parameters:
+        - { $ref: "#/components/parameters/idempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AclSetRequest" }
+      responses:
+        "200":
+          description: 已替换（触发策略版本增长）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/Task", nullable: true, description: "异步传播任务（可选）" }
+  /api/v1/documents/{documentId}/submit:
+    post:
+      tags: [governance]
+      summary: 提交审核（DRAFT/REJECTED → PENDING_REVIEW）
+      parameters:
+        - { $ref: "#/components/parameters/idempotencyKey" }
+      responses:
+        "202":
+          description: 已进入待审队列
+  /api/v1/documents/{documentId}/reparse:
+    post:
+      tags: [documents]
+      summary: 重新解析当前版本（幂等补偿；超限锁定需管理员介入）
+      parameters:
+        - { $ref: "#/components/parameters/idempotencyKey" }
+      responses:
+        "202":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/Task" }
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /api/v1/documents/{documentId}/disable:
+    post:
+      tags: [documents]
+      summary: 禁用（立即退出检索/问答集合）
+      parameters:
+        - { $ref: "#/components/parameters/idempotencyKey" }
+      responses:
+        "200":
+          description: 已禁用
+  /api/v1/documents/{documentId}/enable:
+    post:
+      tags: [documents]
+      summary: 重新启用（需满足发布/有效期/安全状态）
+      parameters:
+        - { $ref: "#/components/parameters/idempotencyKey" }
+      responses:
+        "200":
+          description: 已启用
+  /api/v1/documents/{documentId}/deletion:
+    post:
+      tags: [documents]
+      summary: 请求删除（先授权与影响预览，异步处置对象/索引/缓存并生成删除证明）
+      parameters:
+        - { $ref: "#/components/parameters/idempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, maxLength: 2048 }
+      responses:
+        "202":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/DeletionTask" }
+        "409":
+          $ref: "#/components/responses/Conflict"
+          description: 命中 legal hold 或不允许删除
+  /api/v1/deletion-tasks/{taskId}:
+    parameters:
+      - name: taskId
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [governance]
+      summary: 删除任务状态与最终删除证明
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/DeletionTask" }
+  /api/v1/deletion-receipts/{receiptId}:
+    parameters:
+      - name: receiptId
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [governance]
+      summary: 删除证明（逐目标处置结果）
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/DeletionReceipt" }
+
+  /api/v1/upload/init:
+    post:
+      tags: [documents]
+      summary: 初始化上传（直传/分片，返回已上传分片用于续传/秒传）
+      parameters:
+        - { $ref: "#/components/parameters/idempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UploadInitRequest" }
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/UploadInitResponse" }
+        "413":
+          $ref: "#/components/responses/QuotaExceeded"
+  /api/v1/upload/{uploadId}/parts/{partNumber}:
+    parameters:
+      - name: uploadId
+        in: path
+        required: true
+        schema: { type: string }
+      - name: partNumber
+        in: path
+        required: true
+        schema: { type: integer, minimum: 1 }
+    put:
+      tags: [documents]
+      summary: 上传单个分片（幂等：同 partNumber 覆盖）
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: { type: string, format: binary }
+      responses:
+        "204":
+          description: 分片已接收
+  /api/v1/upload/{uploadId}/complete:
+    post:
+      tags: [documents]
+      summary: 合并并进入安全摄取队列（服务端重算 SHA-256）
+      parameters:
+        - { $ref: "#/components/parameters/idempotencyKey" }
+      responses:
+        "202":
+          description: 已接受；文档进入 QUARANTINED → 扫描 → 解析
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/Task" }
+        "422":
+          $ref: "#/components/responses/SafetyBlocked"
+
+  /api/v1/connections:
+    get:
+      tags: [connectors]
+      summary: 连接器列表
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/Connector" }
+    post:
+      tags: [connectors]
+      summary: 创建连接器（secret 只接受 SecretRef）
+      parameters:
+        - { $ref: "#/components/parameters/idempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ConnectorCreateRequest" }
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/Connector" }
+  /api/v1/connections/{connectionId}:
+    parameters:
+      - name: connectionId
+        in: path
+        required: true
+        schema: { type: integer, format: int64 }
+    get:
+      tags: [connectors]
+      summary: 连接器详情
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/Connector" }
+    patch:
+      tags: [connectors]
+      summary: 更新配置
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                config: { type: object }
+                enabled: { type: boolean }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/Connector" }
+    delete:
+      tags: [connectors]
+      summary: 删除连接器（已同步对象按策略处置）
+      parameters:
+        - { $ref: "#/components/parameters/idempotencyKey" }
+      responses:
+        "202":
+          description: 已接受删除
+  /api/v1/connections/{connectionId}/validate:
+    post:
+      tags: [connectors]
+      summary: 校验连接配置与权限（不创建）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ConnectorValidateRequest" }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/ConnectorValidateResult" }
+  /api/v1/connections/{connectionId}/sync:
+    post:
+      tags: [connectors]
+      summary: 启动同步（FULL/INCREMENTAL）
+      parameters:
+        - { $ref: "#/components/parameters/idempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [syncType]
+              properties:
+                syncType: { type: string, enum: [FULL, INCREMENTAL, RECONCILE] }
+      responses:
+        "202":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/Task" }
+  /api/v1/sync-jobs/{jobId}:
+    parameters:
+      - name: jobId
+        in: path
+        required: true
+        schema: { type: integer, format: int64 }
+    get:
+      tags: [connectors]
+      summary: 同步任务状态
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/SyncJob" }
+    post:
+      tags: [connectors]
+      summary: 取消同步任务
+      responses:
+        "202":
+          description: 已请求取消
+
+  /api/v1/metadata-schemas:
+    get:
+      tags: [governance]
+      summary: 元数据 schema 列表
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/MetadataSchema" }
+    post:
+      tags: [governance]
+      summary: 创建元数据 schema（草稿）
+      parameters:
+        - { $ref: "#/components/parameters/idempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, schema]
+              properties:
+                name: { type: string, maxLength: 128 }
+                schema: { type: object, description: "受控 JSON Schema 子集；禁止可执行表达式" }
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/MetadataSchema" }
+  /api/v1/metadata-schemas/{schemaId}/publish:
+    post:
+      tags: [governance]
+      summary: 发布 schema 版本（发布后不可变）
+      parameters:
+        - { $ref: "#/components/parameters/idempotencyKey" }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/MetadataSchema" }
+  /api/v1/documents/{documentId}/metadata:
+    put:
+      tags: [governance]
+      summary: 设置文档元数据（发布前校验必填/受控词表）
+      parameters:
+        - { $ref: "#/components/parameters/idempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [schemaId, values]
+              properties:
+                schemaId: { type: integer, format: int64 }
+                values: { type: object }
+      responses:
+        "200":
+          description: 已保存并校验
+        "422":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/v1/reviews:
+    get:
+      tags: [governance]
+      summary: 待审队列（按审核人可见范围）
+      parameters:
+        - { $ref: "#/components/parameters/page" }
+        - { $ref: "#/components/parameters/size" }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/PageData" }
+  /api/v1/reviews/{reviewId}/approve:
+    post:
+      tags: [governance]
+      summary: 审核通过（PUBLISHED，绑定 documentVersionId 防 A 审 B 发）
+      parameters:
+        - { $ref: "#/components/parameters/idempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReviewActionRequest" }
+      responses:
+        "200":
+          description: 已发布
+  /api/v1/reviews/{reviewId}/reject:
+    post:
+      tags: [governance]
+      summary: 驳回（REJECTED + 意见，保留向量待重审）
+      parameters:
+        - { $ref: "#/components/parameters/idempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReviewActionRequest" }
+      responses:
+        "200":
+          description: 已驳回
+  /api/v1/documents/{documentId}/withdraw:
+    post:
+      tags: [governance]
+      summary: 撤回（PUBLISHED → WITHDRAWN，退出检索）
+      parameters:
+        - { $ref: "#/components/parameters/idempotencyKey" }
+      responses:
+        "200":
+          description: 已撤回
+
+  /api/v1/retention-policies:
+    get:
+      tags: [governance]
+      summary: 保留策略列表
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/RetentionPolicy" }
+    post:
+      tags: [governance]
+      summary: 创建保留策略
+      parameters:
+        - { $ref: "#/components/parameters/idempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, retentionDays]
+              properties:
+                name: { type: string }
+                match: { type: object }
+                retentionDays: { type: integer, minimum: 1 }
+                onExpire: { type: string, enum: [ARCHIVE, REVIEW, DELETE] }
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/RetentionPolicy" }
+  /api/v1/legal-holds:
+    get:
+      tags: [governance]
+      summary: 法律保全列表
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/LegalHold" }
+    post:
+      tags: [governance]
+      summary: 创建法律保全（覆盖普通保留/删除）
+      parameters:
+        - { $ref: "#/components/parameters/idempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, reason, documentIds]
+              properties:
+                name: { type: string }
+                reason: { type: string }
+                documentIds: { type: array, items: { type: integer }, minItems: 1 }
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/LegalHold" }
+
+  /api/v1/search:
+    get:
+      tags: [search-chat]
+      summary: 全文搜索（BM25 + 可选向量融合；授权预过滤 + 高亮）
+      security:
+        - oidcSession: []
+        - apiKeyAuth: []
+      parameters:
+        - { $ref: "#/components/parameters/cursor" }
+        - name: q
+          in: query
+          required: true
+          schema: { type: string, maxLength: 512 }
+        - name: kbIds
+          in: query
+          style: form
+          explode: false
+          schema: { type: array, items: { type: integer } }
+        - name: fileExts
+          in: query
+          style: form
+          explode: false
+          schema: { type: array, items: { type: string } }
+        - name: sensitivity
+          in: query
+          style: form
+          explode: false
+          schema: { type: array, items: { type: string } }
+        - name: dateFrom
+          in: query
+          schema: { type: string, format: date }
+        - name: dateTo
+          in: query
+          schema: { type: string, format: date }
+        - name: size
+          in: query
+          schema: { type: integer, default: 20, maximum: 100 }
+      responses:
+        "200":
+          description: 命中的授权文档切片（分页/游标）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/CursorPageData" }
+  /api/v1/search/hits/{hitId}/excerpt:
+    get:
+      tags: [search-chat]
+      summary: 命中片段引用（重新授权后返回）
+      security:
+        - oidcSession: []
+        - apiKeyAuth: []
+      parameters:
+        - name: hitId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          excerpt: { type: string }
+                          location: { type: object, nullable: true }
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/chats:
+    get:
+      tags: [search-chat]
+      summary: 我的会话列表
+      parameters:
+        - { $ref: "#/components/parameters/page" }
+        - { $ref: "#/components/parameters/size" }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/PageData" }
+    post:
+      tags: [search-chat]
+      summary: 创建会话（选择 1-5 个知识库）
+      parameters:
+        - { $ref: "#/components/parameters/idempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ChatSessionCreateRequest" }
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/ChatSession" }
+  /api/v1/chats/{chatId}:
+    parameters:
+      - name: chatId
+        in: path
+        required: true
+        schema: { type: integer, format: int64 }
+    get:
+      tags: [search-chat]
+      summary: 会话消息列表（分页）
+      parameters:
+        - { $ref: "#/components/parameters/cursor" }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/CursorPageData" }
+    delete:
+      tags: [search-chat]
+      summary: 删除会话（逻辑删除）
+      responses:
+        "204":
+          description: 已删除
+  /api/v1/chats/{chatId}/messages:
+    post:
+      tags: [search-chat]
+      summary: 提问（SSE 流式；先 meta，再 token*，再 sources?，再 final）
+      parameters:
+        - { $ref: "#/components/parameters/idempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ChatAskRequest" }
+      responses:
+        "200":
+          description: SSE 事件流；事件：meta / token / sources / final / error（见 03-详细设计 §9.3）
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                example: "event: meta\\ndata: {\\\"requestId\\\":\\\"...\\\",\\\"messageId\\\":1,\\\"modelRoute\\\":\\\"...\\\",\\\"promptVersion\\\":1}\\n\\n"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/chats/{chatId}/messages/{messageId}/feedback:
+    post:
+      tags: [search-chat]
+      summary: 回答反馈（赞/踩，踩时建议填写原因）
+      parameters:
+        - { $ref: "#/components/parameters/idempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FeedbackRequest" }
+      responses:
+        "204":
+          description: 已记录反馈
+  /api/v1/messages/{messageId}/sources/{sourceId}:
+    parameters:
+      - name: messageId
+        in: path
+        required: true
+        schema: { type: integer, format: int64 }
+      - name: sourceId
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [search-chat]
+      summary: 引用来源（按当前权限重新授权；撤权后显示"来源不可再访问"）
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/ChatSource" }
+        "403":
+          description: 来源已撤权/不可访问（不泄漏标题与摘要）
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/analytics/usage:
+    get:
+      tags: [analytics]
+      summary: 用量统计（问答量/无答案率/低置信率/活跃用户/热门文档）
+      parameters:
+        - name: period
+          in: query
+          required: true
+          schema: { type: string, enum: [DAY, WEEK, MONTH] }
+        - name: kbId
+          in: query
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/UsageReport" }
+  /api/v1/analytics/costs:
+    get:
+      tags: [analytics]
+      summary: 成本统计（按模型聚合）
+      parameters:
+        - name: period
+          in: query
+          required: true
+          schema: { type: string, enum: [DAY, WEEK, MONTH] }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/CostReport" }
+  /api/v1/analytics/export:
+    get:
+      tags: [analytics]
+      summary: 导出报表（CSV/Excel；权限最小化 + 脱敏）
+      parameters:
+        - name: kind
+          in: query
+          required: true
+          schema: { type: string, enum: [usage, cost, health] }
+        - name: period
+          in: query
+          required: true
+          schema: { type: string, enum: [DAY, WEEK, MONTH] }
+      responses:
+        "200":
+          description: 文件流（CSV 或 Excel）
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+  /api/v1/analytics/kb-health:
+    get:
+      tags: [analytics]
+      summary: 知识库健康度（无答案率/低置信率/新鲜度）
+      parameters:
+        - name: kbId
+          in: query
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          kbId: { type: integer, format: int64 }
+                          noAnswerRate: { type: number }
+                          lowConfidenceRate: { type: number }
+                          staleSince: { type: string, format: date-time, nullable: true }
+
+  /api/v1/audit-logs:
+    get:
+      tags: [audit]
+      summary: 审计日志（AUDITOR/TENANT_ADMIN；追加写只读）
+      parameters:
+        - { $ref: "#/components/parameters/page" }
+        - { $ref: "#/components/parameters/size" }
+        - name: action
+          in: query
+          schema: { type: string }
+        - name: resourceType
+          in: query
+          schema: { type: string }
+        - name: actorId
+          in: query
+          schema: { type: integer, format: int64 }
+        - name: dateFrom
+          in: query
+          schema: { type: string, format: date }
+        - name: dateTo
+          in: query
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/PageData" }
+
+  /api/v1/webhook-subscriptions:
+    get:
+      tags: [integration]
+      summary: Webhook 订阅列表
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/WebhookSubscription" }
+    post:
+      tags: [integration]
+      summary: 创建订阅（URL 必须 https，经 SSRF 防护）
+      parameters:
+        - { $ref: "#/components/parameters/idempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookSubscriptionRequest" }
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/WebhookSubscription" }
+  /api/v1/webhook-subscriptions/{subscriptionId}:
+    parameters:
+      - name: subscriptionId
+        in: path
+        required: true
+        schema: { type: integer, format: int64 }
+    delete:
+      tags: [integration]
+      summary: 删除订阅
+      responses:
+        "204":
+          description: 已删除
+  /api/v1/webhook-deliveries:
+    get:
+      tags: [integration]
+      summary: 投递记录（状态/重试/死信）
+      parameters:
+        - { $ref: "#/components/parameters/page" }
+        - { $ref: "#/components/parameters/size" }
+        - name: status
+          in: query
+          schema: { type: string, enum: [PENDING, SENDING, SUCCEEDED, RETRY, DEAD] }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/PageData" }
+
+  /api/v1/orgs:
+    get:
+      tags: [integration]
+      summary: 组织树（部门）
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/Org" }
+    post:
+      tags: [integration]
+      summary: 创建组织节点
+      parameters:
+        - { $ref: "#/components/parameters/idempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OrgCreateRequest" }
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/Org" }
+  /api/v1/orgs/{orgId}:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema: { type: integer, format: int64 }
+    patch:
+      tags: [integration]
+      summary: 更新组织（改名/移动父节点）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, maxLength: 128 }
+                parentId: { type: integer, format: int64, nullable: true }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/Org" }
+    delete:
+      tags: [integration]
+      summary: 删除组织（需先清空成员或迁移，触发策略版本增长）
+      responses:
+        "204":
+          description: 已删除
+
+  /api/v1/tags:
+    get:
+      tags: [documents]
+      summary: 标签列表
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { type: object }
+    post:
+      tags: [documents]
+      summary: 创建标签
+      parameters:
+        - { $ref: "#/components/parameters/idempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, maxLength: 64 }
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          id: { type: integer, format: int64 }
+                          name: { type: string }
+  /api/v1/favorites:
+    get:
+      tags: [documents]
+      summary: 我的收藏
+      parameters:
+        - { $ref: "#/components/parameters/page" }
+        - { $ref: "#/components/parameters/size" }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/PageData" }
+    post:
+      tags: [documents]
+      summary: 收藏文档
+      parameters:
+        - { $ref: "#/components/parameters/idempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [documentId]
+              properties:
+                documentId: { type: integer, format: int64 }
+      responses:
+        "204":
+          description: 已收藏
+    delete:
+      tags: [documents]
+      summary: 取消收藏
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [documentId]
+              properties:
+                documentId: { type: integer, format: int64 }
+      responses:
+        "204":
+          description: 已取消
+
+  /api/v1/tasks/{taskId}:
+    parameters:
+      - name: taskId
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [governance]
+      summary: 通用异步任务状态（进度/错误/取消/重试）
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/Task" }
+    post:
+      tags: [governance]
+      summary: 取消任务（仅 RUNNING/QUEUED）
+      responses:
+        "202":
+          description: 已请求取消

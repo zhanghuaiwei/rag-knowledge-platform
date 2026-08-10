@@ -1,0 +1,4 @@
+interface:
+  display_name: "Frontend Coding Standards"
+  short_description: "Implement or review frontend work and visible UI states."
+  default_prompt: "按项目前端规则和唯一 API 契约完成这项前端任务，并验证交互状态和可见结果。"
