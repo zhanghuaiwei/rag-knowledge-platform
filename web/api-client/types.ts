@@ -61,6 +61,13 @@ export interface Kb {
   members: KbMember[];
 }
 
+/** 知识库可编辑字段（索引 Profile / 数据区域等不可变字段不在其列）。 */
+export interface UpdateKbInput {
+  name?: string;
+  description?: string;
+  requiresReview?: boolean;
+}
+
 // ---- 文档 -------------------------------------------------------------
 
 export type IngestStatus =
@@ -125,6 +132,15 @@ export interface DocumentListParams extends PageParams {
   reviewStatus?: ReviewStatus;
   sensitivity?: Sensitivity;
   keyword?: string;
+}
+
+/** 文档上传请求：真实实现为分片上传 + 安全扫描（GKB-03），此处为最小字段集。 */
+export interface UploadDocumentInput {
+  kbId: number;
+  title: string;
+  fileName: string;
+  fileSize: number;
+  sensitivity: Sensitivity;
 }
 
 // ---- 问答 -------------------------------------------------------------
@@ -285,6 +301,10 @@ export interface AuditLog {
   reasonCode: string | null;
   requestId: string;
   occurredAt: string;
+}
+
+export interface AuditLogListParams extends PageParams {
+  result?: AuditLog["result"];
 }
 
 export interface ApiKey {

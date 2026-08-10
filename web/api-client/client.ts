@@ -11,6 +11,7 @@ import { mockClient } from "@/api-client/mock";
 import type {
   ApiKey,
   AuditLog,
+  AuditLogListParams,
   ChatMessage,
   ChatMessageInput,
   ChatSession,
@@ -36,6 +37,8 @@ import type {
   Tag,
   TokenCost,
   TopDocument,
+  UpdateKbInput,
+  UploadDocumentInput,
   User,
   Webhook,
 } from "@/api-client/types";
@@ -48,12 +51,14 @@ export interface ApiClient {
   // ---- 知识库 ----
   listKbs(params?: PageParams): Promise<PageResult<Kb>>;
   getKb(id: number): Promise<Kb>;
+  updateKb(id: number, input: UpdateKbInput): Promise<Kb>;
   listKbMembers(kbId: number): Promise<KbMember[]>;
 
   // ---- 文档 ----
   listDocuments(params?: DocumentListParams): Promise<PageResult<DocumentSummary>>;
   getDocument(id: number): Promise<DocumentDetail>;
   listDocumentVersions(documentId: number): Promise<DocumentVersion[]>;
+  uploadDocument(input: UploadDocumentInput): Promise<DocumentSummary>;
 
   // ---- 问答 ----
   listChatSessions(params?: PageParams): Promise<PageResult<ChatSession>>;
@@ -73,7 +78,7 @@ export interface ApiClient {
   // ---- 管理 ----
   listUsers(params?: PageParams): Promise<PageResult<User>>;
   listOrgs(): Promise<Org[]>;
-  listAuditLogs(params?: PageParams): Promise<PageResult<AuditLog>>;
+  listAuditLogs(params?: AuditLogListParams): Promise<PageResult<AuditLog>>;
   listApiKeys(): Promise<ApiKey[]>;
   listWebhooks(): Promise<Webhook[]>;
   listReviews(params?: PageParams): Promise<PageResult<ReviewItem>>;

@@ -6,6 +6,7 @@
  */
 import type { ApiClient } from "@/api-client/client";
 import type {
+  AuditLogListParams,
   ChatSource,
   DocumentListParams,
   PageParams,
@@ -32,6 +33,16 @@ export const mockClient: ApiClient = {
     await delay(120);
     const kb = db.kbs.find((item) => item.id === id);
     if (!kb) notFound("知识库");
+    return kb;
+  },
+  async updateKb(id, input) {
+    await delay(300);
+    const kb = db.kbs.find((item) => item.id === id);
+    if (!kb) notFound("知识库");
+    if (input.name !== undefined) kb.name = input.name;
+    if (input.description !== undefined) kb.description = input.description;
+    if (input.requiresReview !== undefined) kb.requiresReview = input.requiresReview;
+    kb.updatedAt = new Date().toISOString();
     return kb;
   },
   async listKbMembers(kbId: number) {
@@ -70,6 +81,32 @@ export const mockClient: ApiClient = {
     const detail = db.getDocumentDetail(documentId);
     if (!detail) notFound("文档");
     return detail.versions;
+  },
+  async uploadDocument(input) {
+    await delay(500);
+    const kb = db.kbs.find((item) => item.id === input.kbId);
+    if (!kb) notFound("知识库");
+    const fileExt = input.fileName.split(".").pop()?.toLowerCase() ?? "";
+    const doc = {
+      id: Math.max(0, ...db.documents.map((item) => item.id)) + 1,
+      kbId: kb.id,
+      kbName: kb.name,
+      title: input.title,
+      fileName: input.fileName,
+      fileExt,
+      mimeType: "application/octet-stream",
+      sourceType: "UPLOAD" as const,
+      fileSize: input.fileSize,
+      versionNo: 1,
+      ingestStatus: "PARSING" as const,
+      reviewStatus: "DRAFT" as const,
+      sensitivity: input.sensitivity,
+      ownerName: db.currentUser.name,
+      chunkCount: 0,
+      updatedAt: new Date().toISOString(),
+    };
+    db.documents.unshift(doc);
+    return doc;
   },
 
   // ---- 问答 ----
@@ -157,9 +194,10 @@ export const mockClient: ApiClient = {
     await delay();
     return db.orgs;
   },
-  async listAuditLogs(params: PageParams = {}) {
+  async listAuditLogs(params: AuditLogListParams = {}) {
     await delay();
-    return paginate(db.auditLogs, params.page, params.size);
+    const items = params.result ? db.auditLogs.filter((log) => log.result === params.result) : db.auditLogs;
+    return paginate(items, params.page, params.size);
   },
   async listApiKeys() {
     await delay();

@@ -90,5 +90,8 @@ pnpm test        # vitest run
 
 - [x] Next.js 工程、lint/typecheck/test 命令、`/api/health` 探针
 - [x] 完整 mock 数据层(脱离后端可演示)
-- [ ] OpenAPI v0.2 冻结后由契约生成 client/type(替换 mock transport)
-- [ ] 按页面边界实现知识库 / 文档 / 问答 / 治理 / 用量页面
+- [x] 产品化页面(mock 演示):工作台、问答(模拟流式)、搜索、知识库(列表/向导/详情)、文档库/详情、治理审核、质量用量、管理中心(成员/API Key/Webhook/审计)、登录页;设计见 `../docs/modules/enterprise-generalization/design/web-product-design.md`
+- [x] 主题与布局可配置(明暗、主题色、圆角、密度、内容宽度、侧边栏收起,localStorage 持久化)
+- [ ] OpenAPI v0.2 冻结后由契约生成 client/type(替换 mock transport,页面中的 mock 推导与占位动作随之替换)
+- [ ] OIDC Code + PKCE 登录、BFF 会话与 CSRF 防护(当前登录页为 mock 入口)
+- [ ] Playwright E2E 与可访问性基线验证
