@@ -1,31 +1,33 @@
 /**
- * 前端体验层角色判断（权限矩阵 §3.2 的 UI 表达）。
+ * 前端权限判断 helper（权限矩阵的 UI 表达）。
  *
- * 注意：前端只做显示控制与路由守卫，真正的授权仍由服务端策略决定（GKB-01）；
- * 无权限时统一按 401/403/404 处理，不把"无权限"伪装成"不存在"。
+ * 菜单、路由守卫与按钮只使用稳定的 permission 码（见 lib/permissions.ts），
+ * 不直接依赖租户角色；真正的服务端授权由后端策略决定（GKB-01），
+ * 前端只做显示控制，无权限统一按 401/403/404 处理。
  */
 
-/** 可访问管理中心（成员/组织/API Key/Webhook/审计/标签）的角色。 */
-export const ADMIN_ROLES = ["TENANT_ADMIN", "KNOWLEDGE_ADMIN"] as const;
-
-/** 可访问治理中心（审核/元数据/保留/删除）的角色。 */
-export const GOVERNANCE_ROLES = ["TENANT_ADMIN", "KNOWLEDGE_ADMIN", "AUDITOR"] as const;
-
-export function hasAnyRole(roles: string[], allowed: readonly string[]): boolean {
-  return roles.some((role) => (allowed as readonly string[]).includes(role));
+/** 是否具备单个权限；未知权限一律 false（默认拒绝，不宽松回退）。 */
+export function can(permissions: string[], permission: string): boolean {
+  return permissions.includes(permission);
 }
 
-export function canAccessAdmin(roles: string[]): boolean {
-  return hasAnyRole(roles, ADMIN_ROLES);
+/** 是否具备全部所需权限。 */
+export function canAll(permissions: string[], required: readonly string[]): boolean {
+  return required.every((permission) => permissions.includes(permission));
 }
 
-export function canAccessGovernance(roles: string[]): boolean {
-  return hasAnyRole(roles, GOVERNANCE_ROLES);
+/** 是否具备任一权限。 */
+export function canAny(permissions: string[], allowed: readonly string[]): boolean {
+  return allowed.some((permission) => permissions.includes(permission));
 }
 
-/** 知识库角色等级：OWNER ≥ EDITOR ≥ VIEWER。 */
+/**
+ * 知识库角色等级：OWNER ≥ EDITOR ≥ VIEWER。
+ * ⚠️ 未知角色默认拒绝（不按 VIEWER 宽松回退，见 dynamic-menu §10 P1.3）。
+ */
 const KB_ROLE_RANK: Record<string, number> = { VIEWER: 0, EDITOR: 1, OWNER: 2 };
 
-export function kbRoleAtLeast(role: string, min: "OWNER" | "EDITOR" | "VIEWER"): boolean {
-  return (KB_ROLE_RANK[role] ?? 0) >= KB_ROLE_RANK[min];
+export function kbRoleAtLeast(role: string | undefined, min: "OWNER" | "EDITOR" | "VIEWER"): boolean {
+  if (!role) return false;
+  return (KB_ROLE_RANK[role] ?? -1) >= KB_ROLE_RANK[min];
 }

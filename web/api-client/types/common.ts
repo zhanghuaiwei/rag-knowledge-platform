@@ -19,7 +19,20 @@ export interface CurrentUser {
   email: string;
   tenantId: number;
   tenantName: string;
+  /** 当前租户角色（解释身份用，不直接散落到菜单判断）。 */
+  tenantRoles: string[];
+  /** 凭证能力（如 web / API Key scope），不等于租户角色与最终权限。 */
+  credentialScopes: string[];
+  /** 菜单/路由/按钮使用的稳定能力码（服务端集中聚合）。 */
+  permissions: string[];
+  /** 租户套餐、部署模式或后端能力是否可用。 */
+  features: string[];
+  /** 授权策略版本，用于判断缓存上下文是否过期。 */
+  policyVersion: number;
+  /** 兼容展示字段：等于 tenantRoles（菜单/守卫请使用 permissions）。 */
   roles: string[];
+  /** 可切换租户列表（租户切换下拉用）。 */
+  tenants: { tenantId: number; tenantName: string; tenantRoles: string[] }[];
   orgName: string;
 }
 

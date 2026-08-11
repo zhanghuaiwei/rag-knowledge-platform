@@ -23,6 +23,12 @@ export const authApi: AuthApi = {
     return db.currentUser;
   },
 
+  async switchTenant() {
+    await delay();
+    // mock 模式无真实成员关系：返回当前 mock 用户（真实切换由后端 /auth/tenant/switch 完成）
+    return db.currentUser;
+  },
+
   async logout() {
     await delay();
     clearSession();
