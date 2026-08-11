@@ -3,7 +3,7 @@
 > **文档状态**：计划 · **版本**：v0.2-draft · **负责人**：待指定 · **最近更新**：2026-08-10
 > **需求**：[`../requirements/README.md`](../requirements/README.md) · **设计**：[`../design/README.md`](../design/README.md)
 
-当前仓库没有可执行应用和聚焦测试命令；下表全部为 `not-run`，不得作为通过证据。
+**测试命令现状（2026-08）**：仓库已具备可执行测试命令——`service`：`mvn -B test`（接口骨架编译/单测）；`web`：`pnpm test`（Vitest，含 `app/page`、`api-client/http/sse`、`api-client/mock`、`lib/format` 等用例）+ `pnpm lint / typecheck`；`rag-engine`：`uv run pytest -q`（`/healthz` 冒烟）。但业务用例仍为 `NotYetImplemented` stub，**下表业务验收矩阵仍全部为 `not-run`，不得作为通过证据**；待 service 业务用例实现后逐项执行。
 
 ## 1. Gate 0 验收矩阵
 
