@@ -3,21 +3,28 @@
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 
+import { api } from "@/api-client";
 import { Loading } from "@/components/async-state";
-import { isAuthed } from "@/lib/auth";
 
-/** 路由守卫（mock）：(main) 分组内页面要求登录态，未登录跳 /login。 */
+/** 路由守卫：(main) 分组内页面要求登录态；启动时经 getCurrentUser（含自动 refresh）校验。 */
 export function AuthGate({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const [allowed, setAllowed] = useState(false);
 
   useEffect(() => {
-    if (isAuthed()) {
-      setAllowed(true);
-    } else {
-      router.replace(`/login?from=${encodeURIComponent(pathname)}`);
-    }
+    let cancelled = false;
+    api
+      .getCurrentUser()
+      .then(() => {
+        if (!cancelled) setAllowed(true);
+      })
+      .catch(() => {
+        if (!cancelled) router.replace(`/login?from=${encodeURIComponent(pathname)}`);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [router, pathname]);
 
   if (!allowed) {

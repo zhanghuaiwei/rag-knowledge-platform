@@ -1,0 +1,107 @@
+# =====================================================================
+# rag-knowledge-platform · 中间件编排（2G 云服务器最小集）
+#
+# 范围（经确认）：仅 PostgreSQL + Redis + MinIO。
+#   * v0.2 模型走云端 API（DASHSCOPE_API_KEY / DEEPSEEK_API_KEY），不跑 Ollama/Milvus
+#     —— Milvus 需 >4GB 内存、Ollama 大模型 4GB+，2G 实例不可行。
+#   * SearchIndex（OpenSearch）尚未对接，待 S1 契约冻结后再评估。
+#   * rag-engine / server / web 当前均为骨架或依赖后期对接，暂不编排。
+#
+# 安全边界（对齐 SECURITY.md / 04-数据库设计）：
+#   * 不硬编码任何密码 —— 从 .env 注入（.env 不提交仓库，模板见 deploy/compose/.env.example）。
+#   * 镜像使用固定 tag（生产禁用 latest，见 SECURITY.md）。
+#   * 端口绑定地址由 MIDDLEWARE_BIND_ADDRESS 控制，默认 127.0.0.1（仅本机，安全姿态）；
+#     需公网直连时在 .env 显式设 MIDDLEWARE_BIND_ADDRESS=0.0.0.0，并配合云安全组
+#     仅放行必要端口 + 源 IP 白名单（不建议 0.0.0.0/0 全放行）。
+#   * Redis 强制 requirepass（密码取 .env REDIS_PASSWORD），公网暴露时绝不允许无认证。
+#   * 资源限制对齐 2G 实例：三个服务合计约 1.1G，留有系统与后续 app 余量。
+#
+# 使用：
+#   cd deploy/compose
+#   ./deploy.sh                   # 一键：校验结构 → 生成 .env → up -d → 校验数据库初始化
+#   # 手工分步：
+#   cp .env.example .env          # 填入真实密码（含 RAGKB_APP_PASSWORD / RAGKB_MIGRATOR_PASSWORD）
+#   docker compose up -d
+#   # PostgreSQL 首次启动（pgdata 卷为空）时自动执行 ../ddl/init.sql 完成初始化：
+#   #   角色 + ragkb 库 + 48 表 + 最小种子，两个业务角色密码经 .env 注入
+#   #   （见 db-init/01-init-db.sh）。重启不重复执行；重建请 docker compose down -v。
+#   # 独立/托管 PostgreSQL 或空库重建时的手动初始化命令见 docs/04-数据库设计.md §9。
+# =====================================================================
+
+name: ragkb
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ragkb-postgres
+    restart: unless-stopped
+    mem_limit: 512m
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required in .env}
+      POSTGRES_DB: postgres
+      TZ: UTC
+      # 业务角色密码：首次初始化时由 db-init/01-init-db.sh 以 psql -v 传给 init.sql
+      RAGKB_APP_PASSWORD: ${RAGKB_APP_PASSWORD:?RAGKB_APP_PASSWORD required in .env}
+      RAGKB_MIGRATOR_PASSWORD: ${RAGKB_MIGRATOR_PASSWORD:?RAGKB_MIGRATOR_PASSWORD required in .env}
+    ports:
+      # 绑定地址默认 127.0.0.1（仅本机）；公网直连需在 .env 设 MIDDLEWARE_BIND_ADDRESS=0.0.0.0
+      - "${MIDDLEWARE_BIND_ADDRESS:-127.0.0.1}:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # 首次初始化（仅空 pgdata 卷时执行）：DDL 单文件 + 密码注入包装脚本
+      - ../ddl/init.sql:/db-init/init.sql:ro
+      - ./db-init/01-init-db.sh:/docker-entrypoint-initdb.d/01-init-db.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: ragkb-redis
+    restart: unless-stopped
+    mem_limit: 256m
+    environment:
+      # 认证密码注入容器，供 healthcheck 使用；禁止写死明文
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD required in .env}
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "192mb", "--maxmemory-policy", "allkeys-lru", "--requirepass", "${REDIS_PASSWORD:?REDIS_PASSWORD required in .env}"]
+    ports:
+      # 绑定地址默认 127.0.0.1（仅本机）；公网直连需在 .env 设 MIDDLEWARE_BIND_ADDRESS=0.0.0.0
+      - "${MIDDLEWARE_BIND_ADDRESS:-127.0.0.1}:6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      # requirepass 开启后必须带密码探测，否则恒为 NOAUTH 导致 unhealthy
+      # $$ 转义让 $REDIS_PASSWORD 在容器内求值（引用容器 env，而非 compose 层）
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio:RELEASE.2024-12-18T13-15-44Z
+    container_name: ragkb-minio
+    restart: unless-stopped
+    mem_limit: 384m
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER required in .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD required in .env}
+    ports:
+      # 绑定地址默认 127.0.0.1（仅本机）；公网直连需在 .env 设 MIDDLEWARE_BIND_ADDRESS=0.0.0.0
+      - "${MIDDLEWARE_BIND_ADDRESS:-127.0.0.1}:9000:9000"   # S3 API
+      - "${MIDDLEWARE_BIND_ADDRESS:-127.0.0.1}:9001:9001"   # Console
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:
+  redisdata:
+  miniodata:

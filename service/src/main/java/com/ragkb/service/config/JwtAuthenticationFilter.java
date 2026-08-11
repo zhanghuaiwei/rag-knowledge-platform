@@ -1,0 +1,70 @@
+package com.ragkb.service.config;
+
+import com.ragkb.service.common.exception.ApiException;
+import com.ragkb.service.modules.identity.port.TokenBlacklistPort;
+import com.ragkb.service.modules.identity.service.TokenService;
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.http.HttpHeaders;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.stereotype.Component;
+import org.springframework.web.filter.OncePerRequestFilter;
+
+import java.io.IOException;
+
+/**
+ * JWT 认证过滤器（仅 form 模式挂载）：读取 {@code Authorization: Bearer <accessToken>}，
+ * 校验签名/过期并检查黑名单，通过后写 SecurityContext；无 token 直接放行
+ * （后续由 {@code authorizeHttpRequests} 兜底 401）。
+ *
+ * <p>⚠️ 在 {@link TokenService} 人工实现完成前，桩抛出的 {@code UnsupportedOperationException}
+ * 会以 500 返回（web 端默认走 mock，不受影响）；实现完成后签名/过期失败返回 401。
+ */
+@Component
+public class JwtAuthenticationFilter extends OncePerRequestFilter {
+
+    private final TokenService tokenService;
+    private final TokenBlacklistPort blacklistPort;
+
+    public JwtAuthenticationFilter(TokenService tokenService, TokenBlacklistPort blacklistPort) {
+        this.tokenService = tokenService;
+        this.blacklistPort = blacklistPort;
+    }
+
+    @Override
+    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
+            throws ServletException, IOException {
+        String header = request.getHeader(HttpHeaders.AUTHORIZATION);
+        if (header == null || !header.startsWith("Bearer ")) {
+            chain.doFilter(request, response);
+            return;
+        }
+        String token = header.substring(7);
+        try {
+            TokenService.JwtPrincipal principal = tokenService.parseAccess(token);
+            if (blacklistPort.isBlacklisted(principal.jti())) {
+                sendUnauthorized(response);
+                return;
+            }
+            var authorities = principal.scopes().stream()
+                    .map(SimpleGrantedAuthority::new)
+                    .toList();
+            var authentication = new UsernamePasswordAuthenticationToken(principal, token, authorities);
+            SecurityContextHolder.getContext().setAuthentication(authentication);
+        } catch (ApiException e) {
+            sendUnauthorized(response);
+            return;
+        }
+        chain.doFilter(request, response);
+    }
+
+    private void sendUnauthorized(HttpServletResponse response) throws IOException {
+        response.setStatus(401);
+        response.setContentType("application/json;charset=UTF-8");
+        response.getWriter().write("{\"code\":\"E-1001\",\"message\":\"未认证或登录已过期\",\"data\":null}");
+    }
+}

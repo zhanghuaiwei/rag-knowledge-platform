@@ -2,7 +2,7 @@
 
 > **文档状态**：已纳入根设计基线 · **版本**：v0.2.0-design · **负责人**：待指定 · **最近更新**：2026-08-10
 > **需求**：[`../requirements/README.md`](../requirements/README.md) · **v0.2 架构**：[`../../../02-概要设计.md`](../../../02-概要设计.md) · **v0.1 待同步契约**：[`../../../07-API契约.md`](../../../07-API契约.md)
-> **子文档**：[Web 端产品化设计](web-product-design.md)（信息架构、页面与交互、方案对比、待确认问题）
+> **子文档**：[Web 端产品化设计](web-product-design.md)（信息架构、页面与交互） · [Java 后端包结构规范](backend-package-structure.md)（模块化单体与依赖方向） · [认证与授权技术方案](authentication-authorization.md)（认证模式、授权模型、流程与差距） · [Web 动态菜单设计](dynamic-menu.md)（权限驱动菜单、路由和租户切换）
 
 ## 1. 设计目标
 

@@ -8,7 +8,7 @@
 [![Python](https://img.shields.io/badge/Python-3.12%2B-blue)](rag-engine/pyproject.toml)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-teal)](rag-engine/pyproject.toml)
 [![Next.js](https://img.shields.io/badge/Next.js-15-black)](web/package.json)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%2B-336791)](deploy/ddl/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%2B-336791)](deploy/ddl/init.sql)
 
 平台**不是单一聊天机器人**,也不把某个云厂商、向量库或模型写入领域语义。其核心闭环为:
 
@@ -92,7 +92,8 @@ flowchart TB
 | 领域 API 服务 | Java 21 · Spring Boot 3 · Spring Security/Data | [`service/`](service/) |
 | RAG 引擎 | Python 3.12+ · FastAPI · provider-neutral pipeline | [`rag-engine/`](rag-engine/) |
 | Web / BFF | Next.js 15 (App Router) · TypeScript | [`web/`](web/) |
-| 业务数据库 | PostgreSQL 16+ · Flyway | [`deploy/ddl/`](deploy/ddl/) |
+| 业务数据库 | PostgreSQL 16+ · Flyway | [`deploy/ddl/init.sql`](deploy/ddl/init.sql) |
+| 中间件编排 | Docker Compose（PostgreSQL/Redis/MinIO） | [`deploy/compose/`](deploy/compose/) |
 | 对象存储 / 搜索 / 缓存 | S3-compatible · OpenSearch(默认)· Redis-compatible | — |
 | 异步一致性 | PostgreSQL transactional outbox + worker | — |
 | 可观测性 | OpenTelemetry + Prometheus-compatible metrics | — |
@@ -165,14 +166,15 @@ make security    # 轻量硬编码密钥扫描
 
 ### 数据库初始化
 
+一条命令完成新装（角色 + 库 + 48 表 + 最小种子）：
+
 ```bash
-# 以迁移账号执行(密码通过变量传入,不写入仓库)
+# 密码通过 psql 变量传入,不写入仓库
 psql -v ragkb_app_password='***' -v ragkb_migrator_password='***' \
-     -U postgres -d postgres -f deploy/ddl/00-create-database.sql
-# 然后依次:01-schema.sql → 02-seed-data.sql
+     -U postgres -d postgres -f deploy/ddl/init.sql
 ```
 
-> 详见 [`docs/09-部署运维指南.md`](docs/09-部署运维指南.md) 与 [`deploy/ddl/`](deploy/ddl/)。
+> 使用 [`deploy/compose/`](deploy/compose/) 时，PostgreSQL 首次启动会自动执行 `init.sql`（密码取自 `deploy/compose/.env` 的 `RAGKB_APP_PASSWORD` / `RAGKB_MIGRATOR_PASSWORD`）；以下命令适用于独立/托管 PostgreSQL 或空库重建场景。完整启动顺序见 [`docs/09-部署运维指南.md`](docs/09-部署运维指南.md)。
 
 ## 文档导航
 
@@ -180,7 +182,7 @@ psql -v ragkb_app_password='***' -v ragkb_migrator_password='***' \
 - [01 需求分析](docs/01-需求分析.md) · [02 概要设计](docs/02-概要设计.md) · [03 详细设计](docs/03-详细设计.md)
 - [04 数据库设计](docs/04-数据库设计.md) · [05 技术选型](docs/05-技术选型.md) · [06 架构方案](docs/06-架构方案.md)
 - [07 API 契约](docs/07-API契约.md) · [08 测试与质量评估](docs/08-测试与质量评估.md)
-- [09 部署运维指南](docs/09-部署运维指南.md) · [10 里程碑与开发计划](docs/10-里程碑与开发计划.md)
+- [09 部署运维指南](docs/09-部署运维指南.md) · [10 里程碑与开发计划](docs/10-里程碑与开发计划.md)（v0.1 已废弃，替代为 [11 开发路线图](docs/11-开发路线图.md)）
 - 业务模块文档:`docs/modules/<module>/`(enterprise-generalization / order / user)
 
 > **注意**:`07-API契约.md` 与 `10-里程碑与开发计划.md` 为 v0.1 人工摘要,**已废弃**;权威机器契约是 `docs/api/*.openapi.yaml`(当前 v0.2 评审中,未冻结)。实现前务必以 OpenAPI 与 v0.2 设计为准。

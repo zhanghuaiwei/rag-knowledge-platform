@@ -22,3 +22,9 @@ export interface CurrentUser {
   roles: string[];
   orgName: string;
 }
+
+/** 账号密码登录入参（form 模式；生产 OIDC 由 IdP 承载认证）。 */
+export interface LoginInput {
+  username: string;
+  password: string;
+}

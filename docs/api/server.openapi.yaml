@@ -9,7 +9,8 @@ info:
 servers:
   - url: https://api.ragkb.example.com
 security:
-  - oidcSession: []
+  - oidcSession: []      # OIDC 生产：BFF 设置的 HttpOnly 会话 cookie（现状不动）
+  - bearerJwt: []        # form 开发：JWT access token（Authorization: Bearer <token>）
 tags:
   - name: auth
     description: OIDC/BFF 登录、会话、租户切换
@@ -39,6 +40,15 @@ components:
       in: cookie
       name: ragkb_session
       description: BFF 设置的 Secure/HttpOnly/SameSite 会话 cookie；浏览器不保存长期 token（02-概要 §4.1）。
+    bearerJwt:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >-
+        form 模式的 JWT access token；前端仅内存持有（不落 localStorage），随请求头
+        `Authorization: Bearer <token>` 发送。刷新凭证走 HttpOnly cookie `ragkb_refresh`
+        （SameSite=Lax, Path=/api/v1/auth，生产加 Secure），不进入请求头；刷新见
+        `POST /api/v1/auth/refresh`。
     apiKeyAuth:
       type: http
       scheme: bearer
@@ -158,6 +168,17 @@ components:
           type: array
           items: { $ref: "#/components/schemas/TenantContext" }
         scopes: { type: array, items: { type: string } }
+    TokenResponse:
+      type: object
+      description: |
+        登录/刷新响应：access token 进响应体（前端仅内存持有）；refresh token 只写进
+        HttpOnly cookie `ragkb_refresh`，不回传给前端。
+      required: [accessToken, tokenType, expiresIn, session]
+      properties:
+        accessToken: { type: string, description: "JWT access token；前端仅内存持有，不落 localStorage" }
+        tokenType: { type: string, enum: [Bearer], default: Bearer }
+        expiresIn: { type: integer, format: int64, description: "access token 有效秒数" }
+        session: { $ref: "#/components/schemas/AuthSession" }
     ApiKey:
       type: object
       properties:
@@ -575,6 +596,56 @@ components:
       properties:
         name: { type: string, maxLength: 128 }
         parentId: { type: integer, format: int64, nullable: true }
+    User:
+      type: object
+      description: 租户成员视图（管理中心；与全局 sys_user 分离展示）
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        email: { type: string }
+        status: { type: string, enum: [ACTIVE, DISABLED] }
+        role: { type: string, enum: [TENANT_ADMIN, SECURITY_ADMIN, KNOWLEDGE_ADMIN, AUDITOR, MEMBER] }
+        orgName: { type: string, nullable: true }
+        lastLoginAt: { type: string, format: date-time, nullable: true }
+    NotificationItem:
+      type: object
+      description: 租户内用户通知（任务完成/失败、审核待办、配额告警、系统通知）
+      properties:
+        id: { type: integer, format: int64 }
+        kind: { type: string, enum: [TASK_DONE, TASK_FAILED, REVIEW_TODO, QUOTA_WARN, SYSTEM] }
+        level: { type: string, enum: [info, success, warning, error] }
+        title: { type: string }
+        body: { type: string, nullable: true }
+        read: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        href: { type: string, nullable: true, description: "可选跳转路径（相对）" }
+    DauPoint:
+      type: object
+      properties:
+        date: { type: string, format: date }
+        activeUsers: { type: integer }
+    TopDocumentPoint:
+      type: object
+      properties:
+        documentId: { type: integer, format: int64 }
+        fileName: { type: string }
+        kbName: { type: string }
+        qaCount: { type: integer }
+        searchCount: { type: integer }
+    Tag:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        documentCount: { type: integer }
+    FavoriteItem:
+      type: object
+      properties:
+        documentId: { type: integer, format: int64 }
+        title: { type: string }
+        fileName: { type: string }
+        kbName: { type: string }
+        savedAt: { type: string, format: date-time }
 
   responses:
     BadRequest:
@@ -651,7 +722,9 @@ paths:
   /api/v1/auth/session:
     get:
       tags: [auth]
-      summary: 当前会话与可切换租户列表
+      summary: 当前会话与可切换租户列表（form 模式走 Bearer JWT；OIDC 生产走会话 cookie）
+      security:
+        - bearerJwt: []
       responses:
         "200":
           description: 会话信息
@@ -668,16 +741,19 @@ paths:
   /api/v1/auth/logout:
     post:
       tags: [auth]
-      summary: 登出，作废会话与刷新凭证
+      summary: 登出（幂等）：黑名单 access token 的 jti、吊销 refresh 家族、清除 refresh cookie
+      security: []
       responses:
         "204":
-          description: 成功登出
+          description: 成功登出（已携带 access 或 refresh 凭证即吊销对应会话）
         "401":
           $ref: "#/components/responses/Unauthenticated"
   /api/v1/auth/tenant/switch:
     post:
       tags: [auth]
       summary: 切换当前激活租户（仅限当前用户已加入的租户）
+      security:
+        - bearerJwt: []
       requestBody:
         required: true
         content:
@@ -2310,3 +2386,507 @@ paths:
       responses:
         "202":
           description: 已请求取消
+
+  /api/v1/auth/login:
+    post:
+      tags: [auth]
+      summary: 账号密码登录（form 模式，开发/演示；生产走 OIDC authorize）：签发 access token + 写 refresh cookie
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username: { type: string }
+                password: { type: string }
+      responses:
+        "200":
+          description: 登录成功；响应体含 access token（前端仅内存持有），refresh token 写进 HttpOnly cookie `ragkb_refresh`
+          headers:
+            Set-Cookie:
+              description: '`ragkb_refresh=<jwt>; HttpOnly; Path=/api/v1/auth; SameSite=Lax`（生产 https 追加 Secure）'
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/TokenResponse" }
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+
+  /api/v1/auth/refresh:
+    post:
+      tags: [auth]
+      summary: 轮换刷新凭证：读取 HttpOnly cookie `ragkb_refresh`，签发新 access token + 新 refresh cookie
+      description: |
+        - 无 refresh cookie / 过期 → 401。
+        - 正常刷新：旧 refresh token 被轮换作废，响应 Set-Cookie 写入新 refresh token。
+        - 复用检测：已轮换掉的旧 refresh token 再次出现 → 视为被盗 → 吊销整族会话（后续所有
+          该家族的 refresh 均 401）。
+      security: []
+      responses:
+        "200":
+          description: 刷新成功；响应体含新 access token，Set-Cookie 写入轮换后的 refresh token
+          headers:
+            Set-Cookie:
+              description: 轮换后的 `ragkb_refresh=<jwt>`（HttpOnly/Path=/api/v1/auth/SameSite=Lax）
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/TokenResponse" }
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+
+  /api/v1/ping:
+    get:
+      tags: [auth]
+      summary: 存活探针（服务与阶段信息）
+      security: []
+      responses:
+        "200":
+          description: 服务存活
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          service: { type: string }
+                          status: { type: string }
+                          phase: { type: string }
+
+  /api/v1/users:
+    get:
+      tags: [integration]
+      summary: 租户成员列表（TENANT_ADMIN，分页）
+      parameters:
+        - { $ref: "#/components/parameters/page" }
+        - { $ref: "#/components/parameters/size" }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data:
+                        allOf:
+                          - { $ref: "#/components/schemas/PageData" }
+                          - type: object
+                            properties:
+                              items:
+                                type: array
+                                items: { $ref: "#/components/schemas/User" }
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/users/{userId}/enable:
+    parameters:
+      - name: userId
+        in: path
+        required: true
+        schema: { type: integer, format: int64 }
+    post:
+      tags: [integration]
+      summary: 重新启用成员
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/User" }
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/users/{userId}/disable:
+    parameters:
+      - name: userId
+        in: path
+        required: true
+        schema: { type: integer, format: int64 }
+    post:
+      tags: [integration]
+      summary: 停用成员（撤权并清理授权缓存）
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/User" }
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/users/{userId}/org:
+    parameters:
+      - name: userId
+        in: path
+        required: true
+        schema: { type: integer, format: int64 }
+    patch:
+      tags: [integration]
+      summary: 调整成员所属组织
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [orgId]
+              properties:
+                orgId: { type: integer, format: int64, nullable: true }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/User" }
+
+  /api/v1/notifications:
+    get:
+      tags: [integration]
+      summary: 当前用户通知列表（未读在前）
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/NotificationItem" }
+  /api/v1/notifications/{notificationId}/read:
+    post:
+      tags: [integration]
+      summary: 标记单条通知已读
+      parameters:
+        - name: notificationId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "204":
+          description: 已标记
+  /api/v1/notifications/read-all:
+    post:
+      tags: [integration]
+      summary: 全部标记已读
+      responses:
+        "204":
+          description: 已全部标记
+
+  /api/v1/analytics/dau:
+    get:
+      tags: [analytics]
+      summary: 日活用户趋势（DAU）
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/DauPoint" }
+  /api/v1/analytics/top-documents:
+    get:
+      tags: [analytics]
+      summary: 热门文档排行（按问答/搜索次数）
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/TopDocumentPoint" }
+
+  /api/v1/tags/{tagId}:
+    parameters:
+      - name: tagId
+        in: path
+        required: true
+        schema: { type: integer, format: int64 }
+    delete:
+      tags: [documents]
+      summary: 删除标签（解除文档关联）
+      responses:
+        "204":
+          description: 已删除
+
+  /api/v1/documents:
+    get:
+      tags: [documents]
+      summary: 跨知识库文档列表（按权限过滤，分页）
+      parameters:
+        - { $ref: "#/components/parameters/page" }
+        - { $ref: "#/components/parameters/size" }
+        - name: keyword
+          in: query
+          schema: { type: string }
+        - name: reviewStatus
+          in: query
+          schema: { type: string, enum: [DRAFT, PENDING_REVIEW, PUBLISHED, REJECTED, WITHDRAWN] }
+        - name: ingestStatus
+          in: query
+          schema: { type: string }
+        - name: sensitivity
+          in: query
+          schema: { type: string, enum: [PUBLIC, INTERNAL, CONFIDENTIAL, RESTRICTED] }
+        - name: tagId
+          in: query
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data:
+                        allOf:
+                          - { $ref: "#/components/schemas/PageData" }
+                          - type: object
+                            properties:
+                              items:
+                                type: array
+                                items: { $ref: "#/components/schemas/DocumentSummary" }
+
+  /api/v1/kbs/{kbId}/archive:
+    post:
+      tags: [knowledge-bases]
+      summary: 归档知识库（进入 ARCHIVED，停止检索参与）
+      parameters:
+        - { $ref: "#/components/parameters/kbPath" }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/Kb" }
+
+  /api/v1/documents/{documentId}/rollback:
+    post:
+      tags: [documents]
+      summary: 回滚到历史版本（生成新当前版本，保留不可变历史）
+      parameters:
+        - { $ref: "#/components/parameters/docPath" }
+        - { $ref: "#/components/parameters/idempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [versionNo]
+              properties:
+                versionNo: { type: integer, minimum: 1 }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/DocumentDetail" }
+
+  /api/v1/chats/{chatId}/archive:
+    post:
+      tags: [search-chat]
+      summary: 归档会话（停止参与，历史保留）
+      parameters:
+        - name: chatId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/ChatSession" }
+
+  /api/v1/messages/{messageId}/feedback:
+    post:
+      tags: [search-chat]
+      summary: 消息反馈（👍/👎 + 原因；写入评测闭环）
+      parameters:
+        - name: messageId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+        - { $ref: "#/components/parameters/idempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FeedbackRequest" }
+      responses:
+        "204":
+          description: 已记录反馈
+
+  /api/v1/deletion-tasks:
+    get:
+      tags: [governance]
+      summary: 删除任务列表（审批/进度）
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/DeletionTask" }
+  /api/v1/deletion-tasks/{taskId}/approve:
+    post:
+      tags: [governance]
+      summary: 审批删除任务（触发跨存储处置）
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/DeletionTask" }
+
+  /api/v1/deletion-receipts:
+    get:
+      tags: [governance]
+      summary: 删除证明列表（可查证、脱敏）
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/DeletionReceipt" }
+
+  /api/v1/retention-policies/{policyId}:
+    patch:
+      tags: [governance]
+      summary: 启用/停用保留策略
+      parameters:
+        - name: policyId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              properties:
+                enabled: { type: boolean }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/RetentionPolicy" }
+
+  /api/v1/legal-holds/{holdId}/release:
+    post:
+      tags: [governance]
+      summary: 解除法律保全（解除后才允许正常处置）
+      parameters:
+        - name: holdId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/LegalHold" }
+
+  /api/v1/tasks:
+    get:
+      tags: [governance]
+      summary: 当前用户异步任务列表
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/Task" }

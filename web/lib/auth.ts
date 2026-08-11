@@ -1,41 +1,35 @@
 /**
- * 登录态（开发阶段 mock）：localStorage 持有会话标记。
+ * 登录态（JWT）：access token 仅存 React 内存，不落 localStorage/sessionStorage。
  *
- * 开发阶段保留表单登录,供本地与演示环境使用;真实实现为 OIDC Authorization
- * Code + PKCE(GKB-02)：登录后由后端签发 HttpOnly Cookie / 内存 access token,
- * 前端不持久化凭证,届时本模块仅保留守卫跳转语义。
- *
- * 认证边界：表单登录仅用于开发/演示环境,生产环境不暴露;企业平台不开放自助
- * 注册,成员由管理员邀请(管理中心 → 成员与组织)。
+ * refresh token 由后端写进 HttpOnly cookie（ragkb_refresh，SameSite=Lax，
+ * Path=/api/v1/auth），JS 无法读取；刷新走 POST /api/v1/auth/refresh。
+ * 页面刷新后内存 token 丢失，由 auth-gate 启动时经 refresh 自动恢复会话。
+ * ⚠️ 本模块禁止在服务端组件 / RSC 边界调用（SSR 恒为未登录）。
  */
 
-export const AUTH_STORAGE_KEY = "ragkb-auth";
+// 模块级内存变量：仅运行时持有
+let accessToken: string | null = null;
+let expiresAt: number | null = null; // epoch ms
 
-export interface AuthSession {
-  email: string;
-  loginAt: string;
+/** 写入 access token（登录 / 刷新成功时由 api-client transport 调用）。 */
+export function setAuth(token: string, expiresInSeconds: number): void {
+  accessToken = token;
+  expiresAt = Date.now() + expiresInSeconds * 1000;
 }
 
-export function getSession(): AuthSession | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = window.localStorage.getItem(AUTH_STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as AuthSession) : null;
-  } catch {
-    return null;
-  }
+/** 当前有效 access token；未设置或已过期返回 null。 */
+export function getAccessToken(): string | null {
+  if (!accessToken || expiresAt == null || Date.now() >= expiresAt) return null;
+  return accessToken;
 }
 
+/** 是否已登录（存在未过期 access token）。 */
 export function isAuthed(): boolean {
-  return getSession() !== null;
+  return getAccessToken() !== null;
 }
 
-export function setSession(email: string): void {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify({ email, loginAt: new Date().toISOString() }));
-}
-
+/** 清空内存 token（登出 / 刷新失败）。 */
 export function clearSession(): void {
-  if (typeof window === "undefined") return;
-  window.localStorage.removeItem(AUTH_STORAGE_KEY);
+  accessToken = null;
+  expiresAt = null;
 }

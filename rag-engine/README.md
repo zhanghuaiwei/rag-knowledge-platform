@@ -1,9 +1,9 @@
 # rag-engine — RAG 引擎
 
-> 通用企业知识库平台的 **Python RAG 引擎**:解析 / 分块 / Embedding / 检索 / 精排 / 生成。当前为 v0.2 架构骨架,仅提供 `/healthz` 探针;真实端点将在 `server → rag-engine` 内部契约(RetrievalAccessContext / 服务身份认证)冻结后实现。
+> 通用企业知识库平台的 **Python RAG 引擎**:解析 / 分块 / Embedding / 检索 / 精排 / 生成。当前为 v0.2 架构骨架,仅提供 `/healthz` 探针;`domain`/`ports` 领域模型与端口协议已就绪,真实端点待 `server → rag-engine` 内部契约(RetrievalAccessContext / 服务身份认证)评审冻结后按契约实现。
 
 - 权威设计:`../docs/03-详细设计.md`、`../docs/05-技术选型.md`、`../docs/06-架构方案.md`
-- 内部契约(待补):`../docs/api/rag-engine.openapi.yaml`
+- 内部契约:`../docs/api/rag-engine.openapi.yaml`(已建,v0.1,待同步 v0.2)
 
 ## 技术栈
 
@@ -103,5 +103,6 @@ uv run ruff check .     # lint
 ## 当前状态与后续
 
 - [x] FastAPI 工程、`/healthz` 探针、包结构(auth / parsing / ingestion / indexing / retrieval / rerank / generation / safety / providers / observability)
-- [ ] 冻结 `server → rag-engine` 内部契约(RetrievalAccessContext、服务认证、ingest/query/delete/task)
+- [x] `domain` 领域模型(ContentBlock / RetrievalAccessContext / SearchQuery)与 `ports` 协议(Embedding / Reranker / Llm / Parser / SearchIndex / ObjectStore / SecretResolver)
+- [ ] 评审冻结 `server → rag-engine` 内部契约(RetrievalAccessContext、服务认证、ingest/query/delete/task;`docs/api/rag-engine.openapi.yaml` 目前为 v0.1)
 - [ ] 按契约实现解析 / 检索 / 生成端口与默认 provider

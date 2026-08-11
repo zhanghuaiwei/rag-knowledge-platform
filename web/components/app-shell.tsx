@@ -120,8 +120,13 @@ export function AppShell({ children }: { children: ReactNode }) {
       label: "退出登录",
       danger: true,
       onClick: () => {
-        clearSession();
-        router.replace("/login");
+        api
+          .logout()
+          .catch(() => undefined)
+          .finally(() => {
+            clearSession(); // 兜底：即便后端登出失败也清本地内存 token
+            router.replace("/login");
+          });
       },
     },
   ];

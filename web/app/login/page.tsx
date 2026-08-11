@@ -2,14 +2,16 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
-import { Button, Divider, Form, Input } from "antd";
+import { Alert, Button, Divider, Form, Input } from "antd";
 import { ApartmentOutlined, LockOutlined, MailOutlined } from "@ant-design/icons";
 
-import { isAuthed, setSession } from "@/lib/auth";
+import { api } from "@/api-client";
+import { isAuthed } from "@/lib/auth";
 
 /**
- * 开发/演示账号：开发阶段保留表单登录,供本地与演示环境使用。
- * 生产环境走 OIDC,由企业 IdP 承载认证与 MFA,表单登录不暴露。
+ * 开发/演示账号：开发阶段保留表单登录，供本地与演示环境使用。
+ * 生产环境走 OIDC，由企业 IdP 承载认证与 MFA，表单登录不暴露。
+ * 登录成功后由 api.login 持有 access token（内存），refresh 凭证走 HttpOnly cookie。
  */
 const DEV_ACCOUNTS = [
   { email: "admin@ragkb.dev", password: "admin123", role: "管理员" },
@@ -26,24 +28,30 @@ function LoginPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const from = searchParams.get("from");
   const target = from && from.startsWith("/") && !from.startsWith("//") ? from : "/dashboard";
 
-  // 已登录直接进工作台
+  // 已登录（内存 access token 有效）直接进工作台
   useEffect(() => {
     if (isAuthed()) router.replace("/dashboard");
   }, [router]);
 
-  const login = (email: string) => {
-    setSession(email);
-    router.replace(target);
+  const login = async (username: string, password: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      await api.login({ username, password });
+      router.replace(target);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "登录失败，请稍后重试");
+      setLoading(false);
+    }
   };
 
   const onFinish = (values: LoginFormValues) => {
-    setLoading(true);
-    // 开发阶段保留表单登录：演示账号或任意「域邮箱 + 6 位以上密码」均可进入
-    setTimeout(() => login(values.email.trim()), 500);
+    void login(values.email.trim(), values.password);
   };
 
   return (
@@ -54,6 +62,8 @@ function LoginPageInner() {
         <p style={{ color: "var(--text-2)", margin: "8px 0 24px" }}>
           问答 · 搜索 · 治理 · 运营，权限正确且可追溯
         </p>
+
+        {error ? <Alert type="error" showIcon message={error} style={{ marginBottom: 16 }} /> : null}
 
         <Form<LoginFormValues>
           layout="vertical"
@@ -81,7 +91,7 @@ function LoginPageInner() {
             <Input.Password size="large" autoComplete="current-password" placeholder="至少 6 位" prefix={<LockOutlined />} />
           </Form.Item>
           <Form.Item style={{ marginBottom: 12 }}>
-            <Button type="primary" htmlType="submit" size="large" block loading={loading}>
+            <Button type="primary" htmlType="submit" size="large" block loading={loading} disabled={loading}>
               {loading ? "登录中…" : "登录"}
             </Button>
           </Form.Item>
@@ -89,15 +99,21 @@ function LoginPageInner() {
 
         <Divider plain>或</Divider>
 
-        <Button block size="large" icon={<ApartmentOutlined />} onClick={() => login(DEFAULT_DEV_ACCOUNT.email)} disabled={loading}>
+        <Button
+          block
+          size="large"
+          icon={<ApartmentOutlined />}
+          disabled={loading}
+          onClick={() => void login(DEFAULT_DEV_ACCOUNT.email, DEFAULT_DEV_ACCOUNT.password)}
+        >
           使用企业 SSO 登录
         </Button>
 
         <p style={{ fontSize: 12, color: "var(--text-3)", marginTop: 18 }}>
-          开发账号（开发/演示环境生效,生产环境走 OIDC）：
+          开发账号（开发/演示环境生效，生产环境走 OIDC）：
           {DEV_ACCOUNTS.map((a) => `${a.email} / ${a.password}（${a.role}）`).join(" · ")}
           <br />
-          任意「域邮箱 + 6 位以上密码」亦可直接进入 · 企业平台不开放自助注册,成员由管理员邀请开通
+          企业平台不开放自助注册，成员由管理员邀请开通
         </p>
       </div>
     </div>
