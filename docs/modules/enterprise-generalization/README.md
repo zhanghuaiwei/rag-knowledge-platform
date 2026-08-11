@@ -8,6 +8,7 @@
 
 - [需求与差距分析](requirements/README.md)：结论、优先级、通用能力基线和验收标准。
 - [目标设计](design/README.md)：授权闭环、摄取闭环、扩展端口和迁移顺序。
+- [Web 端产品化设计](design/web-product-design.md)：产品定位、角色、信息架构、页面与交互设计、分期和待确认问题（待评审，不冻结契约）。
 - [后端任务](tasks/backend/README.md)：契约、安全、连接器、治理和可靠性任务。
 - [前端任务](tasks/frontend/README.md)：统一认证、连接器、治理和可解释问答体验。
 - [测试与验收](test/README.md)：安全、契约、数据隔离、同步、RAG 质量和灾备门禁。

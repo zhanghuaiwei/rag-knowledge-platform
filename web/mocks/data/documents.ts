@@ -74,3 +74,71 @@ export const documentDetails: Record<number, DocumentDetail> = Object.fromEntrie
 export function getDocumentDetail(id: number): DocumentDetail | undefined {
   return documentDetails[id];
 }
+
+/** 从摘要字段构建详情（补齐 versions/tags/isFavorite/retryCount 默认值）。 */
+function toDetail(summary: DocumentSummary): DocumentDetail {
+  return {
+    ...summary,
+    versions: documentVersions[summary.id] ?? [
+      {
+        versionNo: summary.versionNo,
+        fileSize: summary.fileSize,
+        ingestStatus: summary.ingestStatus,
+        safetyStatus: "PASSED",
+        chunkCount: summary.chunkCount,
+        createdBy: summary.ownerName,
+        createdAt: summary.updatedAt,
+      },
+    ],
+    tags: [],
+    isFavorite: false,
+    retryCount: 0,
+  };
+}
+
+/** 新增文档：同步写入摘要数组与详情/版本存储，保持双存储一致。 */
+export function addDocument(summary: DocumentSummary): DocumentDetail {
+  const detail = toDetail(summary);
+  documents.unshift(summary);
+  documentDetails[summary.id] = detail;
+  documentVersions[summary.id] = detail.versions;
+  return detail;
+}
+
+/**
+ * 更新文档：同时 patch 摘要数组与详情存储。
+ * 摘要不含 versions/tags/isFavorite 等详情字段，仅同步公共字段。
+ */
+export function updateDocument(id: number, patch: Partial<DocumentDetail>): DocumentDetail {
+  const detail = documentDetails[id];
+  if (!detail) throw new Error("文档不存在");
+  Object.assign(detail, patch);
+  const summary = documents.find((item) => item.id === id);
+  if (summary) {
+    summary.kbId = detail.kbId;
+    summary.kbName = detail.kbName;
+    summary.title = detail.title;
+    summary.fileName = detail.fileName;
+    summary.fileExt = detail.fileExt;
+    summary.mimeType = detail.mimeType;
+    summary.sourceType = detail.sourceType;
+    summary.fileSize = detail.fileSize;
+    summary.versionNo = detail.versionNo;
+    summary.ingestStatus = detail.ingestStatus;
+    summary.reviewStatus = detail.reviewStatus;
+    summary.sensitivity = detail.sensitivity;
+    summary.ownerName = detail.ownerName;
+    summary.chunkCount = detail.chunkCount;
+    summary.updatedAt = detail.updatedAt;
+  }
+  return detail;
+}
+
+/** 删除文档：从摘要/详情/版本存储移除（物理删除仅 mock 语义；真实为逻辑删除 + 删除证明）。 */
+export function removeDocument(id: number): boolean {
+  const existed = delete documentDetails[id];
+  delete documentVersions[id];
+  const index = documents.findIndex((item) => item.id === id);
+  if (index >= 0) documents.splice(index, 1);
+  return existed || index >= 0;
+}
