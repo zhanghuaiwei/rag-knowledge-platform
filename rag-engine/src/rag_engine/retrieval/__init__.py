@@ -1,1 +1,19 @@
-"""授权检索：召回前过滤（tenant/KB/allowed-doc/state）→ 候选二次授权 → RRF 融合。"""
+"""授权过滤、关键词/向量召回与融合检索功能包。"""
+
+from rag_engine.retrieval.models import (
+    RetrievedChunk,
+    SearchPageSnapshot,
+    SearchQuery,
+    SearchResult,
+)
+from rag_engine.retrieval.ports import RetrievalPipeline
+from rag_engine.retrieval.service import RetrievalService
+
+__all__ = [
+    "RetrievalPipeline",
+    "RetrievedChunk",
+    "RetrievalService",
+    "SearchPageSnapshot",
+    "SearchQuery",
+    "SearchResult",
+]
