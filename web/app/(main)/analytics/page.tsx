@@ -1,14 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { Card, Progress, Table, Tag } from "antd";
+import { useState } from "react";
+import { Button, Card, Progress, Segmented, Table, Tag } from "antd";
 import type { TableColumnsType } from "antd";
+import { DownloadOutlined } from "@ant-design/icons";
 
 import { api } from "@/api-client";
-import type { TopDocument, TokenCost } from "@/api-client";
+import type { TopDocument, TokenCost, UsageAggregation } from "@/api-client";
 import { Empty, ErrorState, SkeletonRows } from "@/components/async-state";
 import { BarChart, LineChart } from "@/components/charts";
 import { StatCard } from "@/components/stat-card";
+import { downloadCsv } from "@/lib/csv";
 import { formatCost, formatNumber, formatPercent } from "@/lib/format";
 import { useAsync } from "@/lib/use-async";
 
@@ -41,11 +44,30 @@ const topColumns: TableColumnsType<TopDocument> = [
 ];
 
 export default function AnalyticsPage() {
-  const usage = useAsync(() => api.getDailyUsage());
+  const [agg, setAgg] = useState<UsageAggregation>("DAY");
+  const usage = useAsync(() => api.getDailyUsage({ aggregation: agg }), [agg]);
   const costs = useAsync(() => api.getTokenCosts());
   const topDocs = useAsync(() => api.getTopDocuments());
   const dau = useAsync(() => api.getDau());
   const health = useAsync(() => api.getKnowledgeHealth());
+
+  const exportCsv = () => {
+    if (!usage.data || usage.data.length === 0) return;
+    downloadCsv(
+      `usage-${agg.toLowerCase()}-${new Date().toISOString().slice(0, 10)}.csv`,
+      usage.data.map((d) => ({
+        date: d.date,
+        问答量: d.qaCount,
+        无答案: d.noAnswerCount,
+        低置信: d.lowConfCount,
+        搜索量: d.searchCount,
+        活跃用户: d.activeUsers,
+        tokenIn: d.tokenIn,
+        tokenOut: d.tokenOut,
+        成本: d.cost,
+      })),
+    );
+  };
 
   const totals = (usage.data ?? []).reduce(
     (acc, d) => ({
@@ -63,6 +85,20 @@ export default function AnalyticsPage() {
         <div>
           <h1 className="page-title">质量与用量</h1>
           <p className="page-desc">分层指标，不用单一综合分掩盖细分场景退化</p>
+        </div>
+        <div className="page-actions">
+          <Segmented
+            value={agg}
+            onChange={(v) => setAgg(v as UsageAggregation)}
+            options={[
+              { value: "DAY", label: "按日" },
+              { value: "WEEK", label: "按周" },
+              { value: "MONTH", label: "按月" },
+            ]}
+          />
+          <Button icon={<DownloadOutlined />} onClick={exportCsv}>
+            导出 CSV
+          </Button>
         </div>
       </div>
 

@@ -18,11 +18,19 @@ import {
   chatSessions,
 } from "@/mocks/data/chat";
 import {
+  addDocument,
   documents,
+  documentDetails,
   getDocumentDetail,
+  removeDocument,
+  updateDocument,
 } from "@/mocks/data/documents";
+import { documentAcl } from "@/mocks/data/doc-acl";
 import { kbs, kbMembers } from "@/mocks/data/kbs";
-import { connectors, favorites, tags } from "@/mocks/data/misc";
+import { deletionReceipts, deletionTasks } from "@/mocks/data/deletions";
+import { legalHolds, retentionPolicies } from "@/mocks/data/retention-policies";
+import { metadataSchemas } from "@/mocks/data/metadata-schemas";
+import { connectors, favorites, notifications, tags, tasks } from "@/mocks/data/misc";
 import { searchItems } from "@/mocks/data/search";
 import { currentUser, orgs, users } from "@/mocks/data/users";
 
@@ -50,7 +58,11 @@ export const db = {
   kbs,
   kbMembers,
   documents,
+  documentDetails,
   getDocumentDetail,
+  addDocument,
+  updateDocument,
+  removeDocument,
   chatSessions,
   chatMessagesBySession,
   searchItems,
@@ -66,4 +78,12 @@ export const db = {
   tags,
   favorites,
   connectors,
+  tasks,
+  notifications,
+  metadataSchemas,
+  retentionPolicies,
+  legalHolds,
+  deletionTasks,
+  deletionReceipts,
+  documentAcl,
 };

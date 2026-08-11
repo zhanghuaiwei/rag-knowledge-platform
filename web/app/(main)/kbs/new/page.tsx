@@ -5,6 +5,7 @@ import { useState } from "react";
 import { Button, Descriptions, Form, Input, Radio, Select, Space, Steps, Switch } from "antd";
 import { ArrowLeftOutlined } from "@ant-design/icons";
 
+import { api } from "@/api-client";
 import { useToast } from "@/components/feedback";
 
 const STEPS = ["基本信息", "归属与治理", "策略与配额", "确认创建"] as const;
@@ -63,12 +64,32 @@ export default function NewKbPage() {
   };
 
   const submit = async () => {
+    try {
+      await form.validateFields();
+    } catch {
+      return;
+    }
     setSubmitting(true);
-    // mock：真实实现调用创建知识库接口（契约待冻结）
-    setTimeout(() => {
-      toast("success", `知识库「${form.getFieldValue("name")}」已创建（mock）`);
+    try {
+      const values = form.getFieldsValue();
+      await api.createKb({
+        name: values.name,
+        description: values.description,
+        visibility: values.visibility,
+        domain: values.domain,
+        sensitivity: values.sensitivity,
+        retention: values.retention,
+        dataRegion: values.dataRegion,
+        modelPolicy: values.modelPolicy,
+        requiresReview: values.requiresReview,
+        ocrEnabled: values.ocrEnabled,
+      });
+      toast("success", `知识库「${values.name}」已创建`);
       router.push("/kbs");
-    }, 700);
+    } catch (err: unknown) {
+      setSubmitting(false);
+      toast("error", err instanceof Error ? err.message : "创建失败，请重试");
+    }
   };
 
   const fieldProps = { style: { maxWidth: 460 } };

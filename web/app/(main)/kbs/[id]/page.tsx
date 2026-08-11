@@ -2,14 +2,15 @@
 
 import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
-import { Button, Card, Descriptions, List, Modal, Space, Table, Tabs, Tag } from "antd";
+import { Button, Card, Descriptions, Modal, Space, Table, Tabs, Tag } from "antd";
 import type { TableColumnsType } from "antd";
-import { MessageOutlined, PlusOutlined, ReloadOutlined, UploadOutlined } from "@ant-design/icons";
+import { CopyOutlined, MessageOutlined, ReloadOutlined, UploadOutlined } from "@ant-design/icons";
 
 import { api } from "@/api-client";
 import type { Connector, DocumentSummary } from "@/api-client";
 import { Empty, ErrorState, Loading, SkeletonRows } from "@/components/async-state";
 import { useToast } from "@/components/feedback";
+import { MemberManager } from "@/components/kb/member-manager";
 import { KbSettingsForm } from "@/components/kb-settings-form";
 import { StatCard } from "@/components/stat-card";
 import { formatDate, formatDateTime, formatNumber, formatRelative, statusText } from "@/lib/format";
@@ -74,8 +75,21 @@ export default function KbDetailPage() {
   const kb = useAsync(() => api.getKb(kbId), [kbId]);
   const health = useAsync(() => api.getKnowledgeHealth(), [kbId]);
   const docs = useAsync(() => api.listDocuments({ kbId, page: 1, size: 8 }), [kbId, tab === "documents"]);
-  const members = useAsync(() => api.listKbMembers(kbId), [kbId, tab === "members"]);
   const connectors = useAsync(() => api.listConnectors(), [kbId, tab === "connectors"]);
+
+  const [cloning, setCloning] = useState(false);
+  const cloneKb = async () => {
+    setCloning(true);
+    try {
+      const clone = await api.cloneKb(kbId);
+      toast("success", `克隆任务已创建：${clone.name}`);
+      kb.reload();
+    } catch (err: unknown) {
+      toast("error", err instanceof Error ? err.message : "克隆失败");
+    } finally {
+      setCloning(false);
+    }
+  };
 
   if (kb.loading) return <div className="card"><Loading /></div>;
   if (kb.error || !kb.data) return <div className="card"><ErrorState message={kb.error ?? "知识库不存在"} onRetry={kb.reload} /></div>;
@@ -96,6 +110,11 @@ export default function KbDetailPage() {
         </div>
         <div className="page-actions">
           <Button icon={<MessageOutlined />} onClick={() => router.push(`/chat?kb=${data.id}`)}>基于此库问答</Button>
+          {isOwner ? (
+            <Button icon={<CopyOutlined />} loading={cloning} onClick={() => void cloneKb()}>
+              克隆
+            </Button>
+          ) : null}
           {data.role !== "VIEWER" ? (
             <Button type="primary" icon={<UploadOutlined />} onClick={() => router.push(`/documents?kbId=${data.id}&upload=1`)}>
               上传文档
@@ -156,38 +175,7 @@ export default function KbDetailPage() {
         </Card>
       ) : null}
 
-      {tab === "members" ? (
-        members.loading ? (
-          <Card><SkeletonRows rows={4} /></Card>
-        ) : members.error ? (
-          <Card><ErrorState message={members.error} onRetry={members.reload} /></Card>
-        ) : (
-          <Card
-            title="成员与角色"
-            extra={isOwner ? (
-              <Button size="small" type="primary" icon={<PlusOutlined />} onClick={() => toast("info", "mock：邀请成员弹窗（契约待冻结）")}>
-                邀请成员
-              </Button>
-            ) : null}
-          >
-            <List
-              dataSource={members.data ?? data.members}
-              renderItem={(m) => (
-                <List.Item
-                  actions={isOwner && m.role !== "OWNER" ? [
-                    <Button key="remove" size="small" type="link" danger onClick={() => toast("info", "mock：移除成员需影响预览与二次确认")}>
-                      移除
-                    </Button>,
-                  ] : []}
-                >
-                  <List.Item.Meta title={m.userName} />
-                  <Tag color={statusText("kbRole", m.role)[1]}>{statusText("kbRole", m.role)[0]}</Tag>
-                </List.Item>
-              )}
-            />
-          </Card>
-        )
-      ) : null}
+      {tab === "members" ? <MemberManager kbId={kbId} isOwner={isOwner} /> : null}
 
       {tab === "connectors" ? (
         connectors.loading ? (
@@ -255,14 +243,17 @@ export default function KbDetailPage() {
         confirmLoading={archiving}
         okButtonProps={{ danger: true }}
         onCancel={() => setArchiveOpen(false)}
-        onOk={() => {
+        onOk={async () => {
           setArchiving(true);
-          setTimeout(() => {
+          try {
+            await api.archiveKb(kbId);
+            toast("success", "知识库已归档");
+            router.push("/kbs");
+          } catch (err: unknown) {
+            toast("error", err instanceof Error ? err.message : "归档失败");
             setArchiving(false);
             setArchiveOpen(false);
-            toast("success", "知识库已归档（mock）");
-            router.push("/kbs");
-          }, 600);
+          }
         }}
       >
         <div>

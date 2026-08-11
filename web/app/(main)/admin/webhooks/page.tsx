@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Button, Card, Switch, Table, Tag, Typography } from "antd";
+import { Button, Card, Form, Input, Modal, Select, Switch, Table, Tag, Typography } from "antd";
 import type { TableColumnsType } from "antd";
 import { PlusOutlined } from "@ant-design/icons";
 
@@ -12,24 +12,48 @@ import { useToast } from "@/components/feedback";
 import { formatDateTime } from "@/lib/format";
 import { useAsync } from "@/lib/use-async";
 
+const EVENT_OPTIONS = ["document.review.updated", "document.ingest.finished", "document.ingest.failed", "index.build.published", "legal_hold.changed"];
+
+interface CreateFormValues {
+  name: string;
+  targetUrl: string;
+  eventTypes: string[];
+}
+
 export default function WebhooksPage() {
   const toast = useToast();
   const webhooks = useAsync(() => api.listWebhooks());
-  const [paused, setPaused] = useState<Set<number>>(new Set());
+  const [createForm] = Form.useForm<CreateFormValues>();
   const [pendingId, setPendingId] = useState<number | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
 
-  const toggle = (id: number, currentlyPaused: boolean) => {
+  const toggle = async (id: number, currentlyPaused: boolean) => {
     setPendingId(id);
-    setTimeout(() => {
-      setPaused((prev) => {
-        const next = new Set(prev);
-        if (currentlyPaused) next.delete(id);
-        else next.add(id);
-        return next;
-      });
+    try {
+      await api.toggleWebhook(id, currentlyPaused);
+      toast("success", currentlyPaused ? "Webhook 已恢复投递" : "Webhook 已暂停");
+      webhooks.reload();
+    } catch (err: unknown) {
+      toast("error", err instanceof Error ? err.message : "操作失败");
+    } finally {
       setPendingId(null);
-      toast("success", currentlyPaused ? "Webhook 已恢复投递（mock）" : "Webhook 已暂停（mock）");
-    }, 400);
+    }
+  };
+
+  const handleCreate = async (values: CreateFormValues) => {
+    setCreating(true);
+    try {
+      await api.createWebhook(values);
+      toast("success", "Webhook 已创建");
+      setCreateOpen(false);
+      createForm.resetFields();
+      webhooks.reload();
+    } catch (err: unknown) {
+      toast("error", err instanceof Error ? err.message : "创建失败");
+    } finally {
+      setCreating(false);
+    }
   };
 
   const columns: TableColumnsType<Webhook> = [
@@ -49,7 +73,7 @@ export default function WebhooksPage() {
       title: "投递状态",
       key: "status",
       render: (_, hook) => {
-        const isPaused = paused.has(hook.id) || hook.status === "PAUSED";
+        const isPaused = hook.status === "PAUSED";
         return (
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <Switch
@@ -74,7 +98,7 @@ export default function WebhooksPage() {
           <p className="page-desc">签名投递、重试退避与死信队列；禁止内网与元数据地址</p>
         </div>
         <div className="page-actions">
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => toast("info", "mock：创建 Webhook（egress allowlist 校验，契约待冻结）")}>
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
             创建 Webhook
           </Button>
         </div>
@@ -102,7 +126,7 @@ export default function WebhooksPage() {
                   title="暂无 Webhook"
                   desc="订阅文档发布、审核、同步等事件"
                   action={
-                    <Button onClick={() => toast("info", "mock：创建 Webhook（契约待冻结）")}>
+                    <Button onClick={() => setCreateOpen(true)}>
                       创建 Webhook
                     </Button>
                   }
@@ -112,6 +136,35 @@ export default function WebhooksPage() {
           />
         </Card>
       )}
+
+      <Modal
+        title="创建 Webhook"
+        open={createOpen}
+        onCancel={() => setCreateOpen(false)}
+        onOk={() => createForm.submit()}
+        okText={creating ? "创建中…" : "创建"}
+        confirmLoading={creating}
+      >
+        <Form<CreateFormValues> form={createForm} layout="vertical" requiredMark={false} onFinish={(v) => void handleCreate(v)}>
+          <Form.Item name="name" label="名称" rules={[{ required: true, message: "请输入名称" }]}>
+            <Input placeholder="例如：合规事件推送" maxLength={40} />
+          </Form.Item>
+          <Form.Item
+            name="targetUrl"
+            label="目标地址（HTTPS）"
+            rules={[
+              { required: true, message: "请输入回调地址" },
+              { type: "url", message: "请输入合法的 HTTPS 地址" },
+            ]}
+            extra="禁止内网与元数据地址；egress allowlist 以服务端复核为准"
+          >
+            <Input placeholder="https://hooks.example.com/ragkb" />
+          </Form.Item>
+          <Form.Item name="eventTypes" label="事件类型" rules={[{ required: true, message: "至少订阅一个事件" }]}>
+            <Select mode="multiple" placeholder="选择订阅事件" options={EVENT_OPTIONS.map((e) => ({ value: e, label: e }))} />
+          </Form.Item>
+        </Form>
+      </Modal>
     </div>
   );
 }

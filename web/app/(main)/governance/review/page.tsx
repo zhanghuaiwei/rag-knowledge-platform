@@ -28,27 +28,30 @@ export default function ReviewPage() {
 
   const items = (reviews.data?.items ?? []).filter((item) => !handled[item.documentId]);
 
-  const submitAction = () => {
+  const submitAction = async () => {
     if (!action) return;
     if (action.kind === "REJECTED" && !comment.trim()) {
       toast("error", "驳回必须填写审核意见");
       return;
     }
     setSubmitting(true);
-    setTimeout(() => {
-      setHandled((prev) => {
-        const next = { ...prev };
-        action.ids.forEach((id) => {
-          next[id] = action.kind;
-        });
-        return next;
-      });
+    try {
+      if (action.kind === "APPROVED") {
+        await api.approveReviews(action.ids, comment);
+      } else {
+        await api.rejectReviews(action.ids, comment);
+      }
+      toast("success", `已${action.kind === "APPROVED" ? "通过" : "驳回"} ${action.ids.length} 篇文档`);
       setSelected(new Set());
-      setSubmitting(false);
       setComment("");
-      toast("success", `已${action.kind === "APPROVED" ? "通过" : "驳回"} ${action.ids.length} 篇文档（mock）`);
       setAction(null);
-    }, 600);
+      setHandled({});
+      reviews.reload();
+    } catch (err: unknown) {
+      toast("error", err instanceof Error ? err.message : "操作失败");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const columns: TableColumnsType<ReviewItem> = [
@@ -92,24 +95,18 @@ export default function ReviewPage() {
   ];
 
   return (
-    <div className="page">
-      <div className="page-header">
-        <div>
-          <h1 className="page-title">治理中心 · 审核队列</h1>
-          <p className="page-desc">解析就绪 ≠ 可检索；审核通过后内容才进入在线索引</p>
-        </div>
-        <div className="page-actions">
-          <Button
-            icon={<CheckOutlined />}
-            disabled={selected.size === 0}
-            onClick={() => setAction({ kind: "APPROVED", ids: [...selected] })}
-          >
-            批量通过{selected.size ? ` (${selected.size})` : ""}
-          </Button>
-          <Button danger disabled={selected.size === 0} onClick={() => setAction({ kind: "REJECTED", ids: [...selected] })}>
-            批量驳回{selected.size ? ` (${selected.size})` : ""}
-          </Button>
-        </div>
+    <>
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginBottom: 16 }}>
+        <Button
+          icon={<CheckOutlined />}
+          disabled={selected.size === 0}
+          onClick={() => setAction({ kind: "APPROVED", ids: [...selected] })}
+        >
+          批量通过{selected.size ? ` (${selected.size})` : ""}
+        </Button>
+        <Button danger disabled={selected.size === 0} onClick={() => setAction({ kind: "REJECTED", ids: [...selected] })}>
+          批量驳回{selected.size ? ` (${selected.size})` : ""}
+        </Button>
       </div>
 
       {reviews.loading ? (
@@ -168,6 +165,6 @@ export default function ReviewPage() {
           rows={4}
         />
       </Modal>
-    </div>
+    </>
   );
 }

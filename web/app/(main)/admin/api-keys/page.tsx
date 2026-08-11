@@ -30,32 +30,27 @@ export default function ApiKeysPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [newSecret, setNewSecret] = useState<string | null>(null);
-  const [createdKeys, setCreatedKeys] = useState<ApiKey[]>([]);
-  const [revokedIds, setRevokedIds] = useState<Set<number>>(new Set());
   const [revokeTarget, setRevokeTarget] = useState<ApiKey | null>(null);
   const [revoking, setRevoking] = useState(false);
 
-  const handleCreate = (values: CreateFormValues) => {
+  const handleCreate = async (values: CreateFormValues) => {
     setCreating(true);
-    setTimeout(() => {
-      const id = Date.now();
-      const key: ApiKey = {
-        id,
-        name: values.name.trim(),
-        keyPrefix: `rk-${String(id).slice(-6)}`,
+    try {
+      const { secret } = await api.createApiKey({
+        name: values.name,
         scopes: values.scopes,
-        kbIds: values.kbId ? [values.kbId] : [],
-        status: "ACTIVE",
-        expiresAt: new Date(Date.now() + values.expireDays * 86400000).toISOString(),
-        lastUsedAt: null,
-        createdAt: new Date().toISOString(),
-      };
-      setCreatedKeys((prev) => [key, ...prev]);
-      setNewSecret(`rk-${String(id).slice(-6)}-${Math.random().toString(36).slice(2, 18)}`);
-      setCreating(false);
+        kbId: values.kbId,
+        expireDays: values.expireDays,
+      });
+      setNewSecret(secret);
       setCreateOpen(false);
       createForm.resetFields();
-    }, 600);
+      keys.reload();
+    } catch (err: unknown) {
+      toast("error", err instanceof Error ? err.message : "创建失败");
+    } finally {
+      setCreating(false);
+    }
   };
 
   const copySecret = async () => {
@@ -68,18 +63,22 @@ export default function ApiKeysPage() {
     }
   };
 
-  const confirmRevoke = () => {
+  const confirmRevoke = async () => {
     if (!revokeTarget) return;
     setRevoking(true);
-    setTimeout(() => {
-      setRevokedIds((prev) => new Set(prev).add(revokeTarget.id));
-      setRevoking(false);
-      toast("success", `「${revokeTarget.name}」已吊销，立即生效（mock）`);
+    try {
+      await api.revokeApiKey(revokeTarget.id);
+      toast("success", `「${revokeTarget.name}」已吊销，立即生效`);
       setRevokeTarget(null);
-    }, 600);
+      keys.reload();
+    } catch (err: unknown) {
+      toast("error", err instanceof Error ? err.message : "吊销失败");
+    } finally {
+      setRevoking(false);
+    }
   };
 
-  const allKeys = [...createdKeys, ...(keys.data ?? [])];
+  const allKeys = keys.data ?? [];
 
   const columns: TableColumnsType<ApiKey> = [
     { title: "名称", dataIndex: "name", render: (name: string) => <strong>{name}</strong> },
@@ -102,9 +101,8 @@ export default function ApiKeysPage() {
       title: "状态",
       key: "status",
       render: (_, key) => {
-        const revoked = revokedIds.has(key.id) || key.status === "REVOKED";
-        const label = revoked ? "已吊销" : key.status === "EXPIRED" ? "已过期" : "有效";
-        const color = revoked ? "error" : key.status === "EXPIRED" ? "warning" : "success";
+        const label = key.status === "REVOKED" ? "已吊销" : key.status === "EXPIRED" ? "已过期" : "有效";
+        const color = key.status === "REVOKED" ? "error" : key.status === "EXPIRED" ? "warning" : "success";
         return <Tag color={color}>{label}</Tag>;
       },
     },
@@ -113,16 +111,14 @@ export default function ApiKeysPage() {
     {
       title: "操作",
       key: "action",
-      render: (_, key) => {
-        const revoked = revokedIds.has(key.id) || key.status === "REVOKED";
-        return !revoked && key.status !== "EXPIRED" ? (
+      render: (_, key) =>
+        key.status !== "REVOKED" && key.status !== "EXPIRED" ? (
           <Button type="link" danger onClick={() => setRevokeTarget(key)}>
             吊销
           </Button>
         ) : (
           "—"
-        );
-      },
+        ),
     },
   ];
 

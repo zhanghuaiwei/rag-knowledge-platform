@@ -2,26 +2,24 @@
 
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useState } from "react";
-import { Alert, Button, Descriptions, Modal, Space, Table, Tabs, Tag } from "antd";
-import type { TableColumnsType } from "antd";
+import { useEffect, useState } from "react";
+import { Alert, Button, Descriptions, Modal, Space, Tabs, Tag, Tooltip } from "antd";
 import { DownloadOutlined, EyeOutlined, ReloadOutlined, StarOutlined, DeleteOutlined } from "@ant-design/icons";
 
 import { api } from "@/api-client";
-import type { DocumentDetail, DocumentVersion, IngestStatus } from "@/api-client";
+import type { DocumentDetail } from "@/api-client";
+import { AclEditor } from "@/components/document/acl-editor";
+import { PreviewDialog } from "@/components/document/preview-dialog";
+import { VersionHistory } from "@/components/document/version-history";
 import { ErrorState, Loading } from "@/components/async-state";
 import { useToast } from "@/components/feedback";
 import { LineageGraph, type LineageEdge, type LineageNode } from "@/components/lineage-graph";
 import { useTheme } from "@/components/theme-provider";
-import { formatDateTime, formatFileSize, formatRelative, statusText } from "@/lib/format";
+import { formatFileSize, formatRelative, statusText } from "@/lib/format";
 import { resolveMode } from "@/lib/theme";
 import { useAsync } from "@/lib/use-async";
 
 type TabKey = "versions" | "metadata" | "permission";
-/** mock 预览正文：真实实现为受控预览流（view_content 权限），无 download_original 不请求原始文件。 */
-function mockExcerpt(title: string): string {
-  return `《${title}》内容预览（mock 摘要）\n\n此处展示经服务端净化后的受控预览内容。真实实现中：\n· 预览流按 view_content 权限签发；\n· 无 download_original 权限时不提供原始文件下载；\n· 历史版本与已撤回内容打开时重新授权，失败给出明确原因。`;
-}
 
 /** 由文档详情推导 mock 血缘图：来源 → 文档 → 分块 → 索引 → 消费。 */
 function buildLineage(doc: DocumentDetail): { nodes: LineageNode[]; edges: LineageEdge[] } {
@@ -44,41 +42,6 @@ function buildLineage(doc: DocumentDetail): { nodes: LineageNode[]; edges: Linea
   edges.push({ source: "index", target: "consumer", label: "检索引用" });
   return { nodes, edges };
 }
-function versionColumns(currentVersionNo: number): TableColumnsType<DocumentVersion> {
-  return [
-    {
-      title: "版本",
-      dataIndex: "versionNo",
-      render: (v: number) => (
-        <>
-          v{v}
-          {v === currentVersionNo ? <Tag color="blue" style={{ marginLeft: 6 }}>当前</Tag> : null}
-        </>
-      ),
-    },
-    { title: "大小", dataIndex: "fileSize", render: (v: number) => formatFileSize(v) },
-    {
-      title: "摄取状态",
-      dataIndex: "ingestStatus",
-      render: (v: IngestStatus) => {
-        const [label, color] = statusText("ingest", v);
-        return <Tag color={color}>{label}</Tag>;
-      },
-    },
-    {
-      title: "安全扫描",
-      dataIndex: "safetyStatus",
-      render: (v: DocumentVersion["safetyStatus"]) => {
-        const text = v === "PASSED" ? "通过" : v === "PENDING" ? "待扫描" : v === "BLOCKED" ? "阻断" : "失败";
-        const color = v === "PASSED" ? "success" : v === "BLOCKED" || v === "FAILED" ? "error" : "warning";
-        return <Tag color={color}>{text}</Tag>;
-      },
-    },
-    { title: "分块", dataIndex: "chunkCount", width: 70 },
-    { title: "创建", key: "created", render: (_, v) => `${v.createdBy} · ${formatDateTime(v.createdAt)}` },
-  ];
-}
-
 export default function DocumentDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
@@ -87,12 +50,37 @@ export default function DocumentDetailPage() {
   const docId = Number(params.id);
   const [tab, setTab] = useState<TabKey>("versions");
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [targetPage, setTargetPage] = useState<number | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [favorite, setFavorite] = useState<boolean | null>(null);
   const [retrying, setRetrying] = useState(false);
+  const [rollingBack, setRollingBack] = useState(false);
+
+  const handleRollback = async (versionNo: number) => {
+    setRollingBack(true);
+    try {
+      await api.rollbackVersion(docId, versionNo);
+      toast("success", "已回滚到该版本，重新进入摄取与发布流程");
+      doc.reload();
+    } catch (err: unknown) {
+      toast("error", err instanceof Error ? err.message : "回滚失败");
+    } finally {
+      setRollingBack(false);
+    }
+  };
 
   const doc = useAsync(() => api.getDocument(docId), [docId]);
+
+  // 从搜索/问答引用携带 ?page= 直达预览并定位页码（组件内读 URL，避免 Suspense 约束）
+  useEffect(() => {
+    const pageParam = new URLSearchParams(window.location.search).get("page");
+    const page = pageParam ? Number(pageParam) : null;
+    if (page && !Number.isNaN(page)) {
+      setTargetPage(page);
+      setPreviewOpen(true);
+    }
+  }, [docId]);
 
   if (doc.loading) return <div className="card"><Loading /></div>;
   if (doc.error || !doc.data) {
@@ -110,6 +98,7 @@ export default function DocumentDetailPage() {
   const isFav = favorite ?? data.isFavorite;
   const canDownload = data.sensitivity !== "RESTRICTED"; // mock 权限推导；真实实现由策略结果返回
   const failed = data.ingestStatus === "FAILED" || data.ingestStatus === "BLOCKED";
+  const retryLocked = (data.retryCount ?? 0) >= 3; // 解析失败重试上限 3 次（F2.2-4.2.5）
   const lineage = buildLineage(data);
 
   return (
@@ -131,7 +120,18 @@ export default function DocumentDetailPage() {
           </div>
         </div>
         <div className="page-actions">
-          <Button icon={<StarOutlined />} onClick={() => { setFavorite(!isFav); toast("success", isFav ? "已取消收藏" : "已收藏"); }}>
+          <Button
+            icon={<StarOutlined />}
+            onClick={async () => {
+              try {
+                const next = await api.toggleFavorite(docId);
+                setFavorite(next);
+                toast("success", next ? "已收藏" : "已取消收藏");
+              } catch (err: unknown) {
+                toast("error", err instanceof Error ? err.message : "操作失败");
+              }
+            }}
+          >
             {isFav ? "已收藏" : "收藏"}
           </Button>
           <Button icon={<EyeOutlined />} onClick={() => setPreviewOpen(true)}>预览</Button>
@@ -144,17 +144,28 @@ export default function DocumentDetailPage() {
             下载
           </Button>
           {failed ? (
-            <Button
-              type="primary"
-              icon={<ReloadOutlined />}
-              loading={retrying}
-              onClick={() => {
-                setRetrying(true);
-                setTimeout(() => { setRetrying(false); toast("success", "已重新入队摄取任务（mock）"); }, 600);
-              }}
-            >
-              重试摄取
-            </Button>
+            <Tooltip title={retryLocked ? "解析失败已重试 3 次，需管理员介入或重新上传" : undefined}>
+              <Button
+                type="primary"
+                icon={<ReloadOutlined />}
+                loading={retrying}
+                disabled={retryLocked}
+                onClick={async () => {
+                  setRetrying(true);
+                  try {
+                    await api.retryIngest(docId);
+                    toast("success", "已重新入队摄取任务");
+                    doc.reload();
+                  } catch (err: unknown) {
+                    toast("error", err instanceof Error ? err.message : "重试失败");
+                  } finally {
+                    setRetrying(false);
+                  }
+                }}
+              >
+                {retryLocked ? "已锁定（重试超限）" : "重试摄取"}
+              </Button>
+            </Tooltip>
           ) : (
             <Button danger icon={<DeleteOutlined />} onClick={() => setDeleteOpen(true)}>删除</Button>
           )}
@@ -184,12 +195,11 @@ export default function DocumentDetailPage() {
           />
 
           {tab === "versions" ? (
-            <Table<DocumentVersion>
-              rowKey="versionNo"
-              columns={versionColumns(data.versionNo)}
-              dataSource={data.versions}
-              pagination={false}
-              size="small"
+            <VersionHistory
+              versions={data.versions}
+              currentVersionNo={data.versionNo}
+              rollingBack={rollingBack}
+              onRollback={(v) => void handleRollback(v)}
             />
           ) : null}
 
@@ -217,20 +227,12 @@ export default function DocumentDetailPage() {
           ) : null}
 
           {tab === "permission" ? (
-            <div className="card">
-              <h4 style={{ marginBottom: 10 }}>有效权限推导（可解释权限，mock）</h4>
-              <Descriptions
-                size="small"
-                column={1}
-                items={[
-                  { key: "tenant", label: "租户角色", children: "成员 → 可访问租户内可见库" },
-                  { key: "kb", label: "知识库角色", children: "EDITOR → 可编辑文档与元数据" },
-                  { key: "acl", label: "文档 ACL", children: "无单独限制 → 继承知识库策略" },
-                  { key: "download", label: "下载权限", children: canDownload ? "允许（download_original）" : "拒绝：敏感级为绝密" },
-                ]}
-              />
-              <h4 style={{ margin: "18px 0 10px" }}>来源血缘</h4>
-              <LineageGraph nodes={lineage.nodes} edges={lineage.edges} dark={resolveMode(themeConfig.mode) === "dark"} />
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              <AclEditor documentId={data.id} kbId={data.kbId} />
+              <div className="card">
+                <h4 style={{ margin: "0 0 10px" }}>来源血缘</h4>
+                <LineageGraph nodes={lineage.nodes} edges={lineage.edges} dark={resolveMode(themeConfig.mode) === "dark"} />
+              </div>
             </div>
           ) : null}
         </div>
@@ -262,15 +264,7 @@ export default function DocumentDetailPage() {
         </div>
       </div>
 
-      <Modal
-        title={`预览 · ${data.fileName}`}
-        open={previewOpen}
-        onCancel={() => setPreviewOpen(false)}
-        footer={null}
-        width={720}
-      >
-        <pre style={{ whiteSpace: "pre-wrap", fontFamily: "inherit", margin: 0, color: "var(--text-2)" }}>{mockExcerpt(data.title)}</pre>
-      </Modal>
+      <PreviewDialog open={previewOpen} onClose={() => setPreviewOpen(false)} doc={data} targetPage={targetPage} />
 
       <Modal
         title="删除文档"
@@ -280,14 +274,17 @@ export default function DocumentDetailPage() {
         confirmLoading={deleting}
         okButtonProps={{ danger: true }}
         onCancel={() => setDeleteOpen(false)}
-        onOk={() => {
+        onOk={async () => {
           setDeleting(true);
-          setTimeout(() => {
+          try {
+            await api.deleteDocument(docId);
+            toast("success", "删除已完成并生成删除证明");
+            router.push("/documents");
+          } catch (err: unknown) {
+            toast("error", err instanceof Error ? err.message : "删除失败");
             setDeleting(false);
             setDeleteOpen(false);
-            toast("success", "删除任务已提交，完成后生成删除证明（mock）");
-            router.push("/documents");
-          }, 700);
+          }
         }}
       >
         <div>

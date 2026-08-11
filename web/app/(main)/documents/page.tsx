@@ -27,6 +27,7 @@ function DocumentsPageInner() {
   const [ingest, setIngest] = useState("");
   const [review, setReview] = useState("");
   const [sensitivity, setSensitivity] = useState("");
+  const [tagId, setTagId] = useState("");
   const [uploadOpen, setUploadOpen] = useState(searchParams.get("upload") === "1");
 
   // 关键词防抖：停止输入 300ms 后才发起请求
@@ -39,6 +40,7 @@ function DocumentsPageInner() {
   }, [keywordInput]);
 
   const kbs = useAsync(() => api.listKbs({ page: 1, size: 50 }));
+  const tags = useAsync(() => api.listTags());
   const docs = useAsync(
     () =>
       api.listDocuments({
@@ -49,8 +51,9 @@ function DocumentsPageInner() {
         ingestStatus: (ingest || undefined) as IngestStatus | undefined,
         reviewStatus: (review || undefined) as ReviewStatus | undefined,
         sensitivity: (sensitivity || undefined) as Sensitivity | undefined,
+        tagId: tagId ? Number(tagId) : undefined,
       }),
-    [page, keyword, kbId, ingest, review, sensitivity],
+    [page, keyword, kbId, ingest, review, sensitivity, tagId],
   );
 
   const resetPage = () => setPage(1);
@@ -177,6 +180,14 @@ function DocumentsPageInner() {
             onChange={(v) => { setSensitivity(v ?? ""); resetPage(); }}
             options={SENS_OPTIONS.map((s) => ({ value: s, label: statusText("sensitivity", s)[0] }))}
             style={{ width: 110 }}
+          />
+          <Select
+            placeholder="标签"
+            allowClear
+            value={tagId || undefined}
+            onChange={(v) => { setTagId(v ?? ""); resetPage(); }}
+            options={(tags.data ?? []).map((t) => ({ value: String(t.id), label: t.name }))}
+            style={{ width: 120 }}
           />
         </Space>
       </Card>

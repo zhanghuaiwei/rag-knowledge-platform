@@ -2,15 +2,18 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
-import { Button, Card, Drawer, Empty, Input, Tag } from "antd";
-import { MenuOutlined, SendOutlined } from "@ant-design/icons";
+import { Card, Drawer } from "antd";
 
 import { api } from "@/api-client";
 import type { ChatMessage, ChatSession, ChatStreamResult } from "@/api-client";
 import { Loading } from "@/components/async-state";
-import { MessageItem } from "@/components/chat/message-item";
+import { ChatHeader } from "@/components/chat/chat-header";
+import { ChatInput } from "@/components/chat/chat-input";
+import { ChatMessageList } from "@/components/chat/message-list";
+import { ScopePicker } from "@/components/chat/scope-picker";
 import { SessionList } from "@/components/chat/session-list";
 import type { DisplayMessage } from "@/components/chat/types";
+import { useMockStream } from "@/components/chat/use-mock-stream";
 import { ChatFeedbackModal } from "@/components/chat-feedback-modal";
 import { useToast } from "@/components/feedback";
 import { useAsync } from "@/lib/use-async";
@@ -31,9 +34,11 @@ function ChatPageInner() {
   const [feedbackNote, setFeedbackNote] = useState("");
   const [mobileSessionsOpen, setMobileSessionsOpen] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
-  const streamTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   // 从知识库详情「基于此库问答」带入的库范围（新会话生效）
   const scopeKbId = Number(searchParams.get("kb")) || null;
+  // 新会话知识库范围（多选，最多 5 个；F2.1 用例步骤 3）
+  const [newScopeIds, setNewScopeIds] = useState<number[]>(scopeKbId ? [scopeKbId] : []);
+  const [scopePickerOpen, setScopePickerOpen] = useState(false);
   // 初始化会话选择（支持 ?session= 直达）
   useEffect(() => {
     if (!sessions.data) return;
@@ -79,47 +84,8 @@ function ChatPageInner() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
-  useEffect(
-    () => () => {
-      if (streamTimer.current) clearInterval(streamTimer.current);
-    },
-    [],
-  );
   const activeSession: ChatSession | undefined = sessions.data?.items.find((s) => s.id === activeId);
-  const stopStreaming = () => {
-    if (streamTimer.current) {
-      clearInterval(streamTimer.current);
-      streamTimer.current = null;
-    }
-    setMessages((prev) => prev.map((m) => (m.streaming ? { ...m, streaming: false, content: `${m.content}\n\n（已停止生成）` } : m)));
-    setSending(false);
-  };
-  /** 模拟 SSE token 流：接入真实后端后由 api-client 的 SSE 封装驱动（契约待冻结）。 */
-  const streamAnswer = (result: ChatStreamResult) => {
-    const full = result.content;
-    let cursor = 0;
-    streamTimer.current = setInterval(() => {
-      cursor += 2 + Math.floor(Math.random() * 3);
-      const done = cursor >= full.length;
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === result.messageId
-            ? {
-                ...m,
-                content: full.slice(0, cursor),
-                streaming: !done,
-                ...(done ? { sources: result.sources, suggestions: result.suggestions } : {}),
-              }
-            : m,
-        ),
-      );
-      if (done && streamTimer.current) {
-        clearInterval(streamTimer.current);
-        streamTimer.current = null;
-        setSending(false);
-      }
-    }, 30);
-  };
+  const { streamAnswer, stopStreaming } = useMockStream(setMessages, () => setSending(false));
   const send = async (raw?: string) => {
     const content = (raw ?? input).trim();
     if (!content || sending) return;
@@ -128,10 +94,19 @@ function ChatPageInner() {
 
     let sessionId = activeId;
     if (sessionId === null) {
-      // 本地新建会话（mock）；真实实现由服务端创建会话后返回 id
-      sessionId = Date.now();
-      setActiveId(sessionId);
-      setMessages([]);
+      // 新会话：按用户选择的知识库范围创建真实会话（mock 层持久化）
+      try {
+        const created = await api.createChatSession({ kbIds: newScopeIds });
+        sessionId = created.id;
+        setActiveId(sessionId);
+        setMessages([]);
+        sessions.reload();
+      } catch {
+        // mock 创建失败时降级为本地会话
+        sessionId = Date.now();
+        setActiveId(sessionId);
+        setMessages([]);
+      }
     }
 
     const userMsg: DisplayMessage = { id: Date.now() + 1, role: "USER", content };
@@ -142,7 +117,7 @@ function ChatPageInner() {
       const result = await api.sendChatMessage({
         sessionId,
         content,
-        kbIds: activeSession?.kbIds ?? (scopeKbId ? [scopeKbId] : []),
+        kbIds: activeSession?.kbIds ?? newScopeIds,
       });
       setMessages((prev) =>
         prev.map((m) =>
@@ -188,11 +163,20 @@ function ChatPageInner() {
       toast("success", "感谢反馈，已记录用于质量评估");
     }
   };
-  const submitFeedback = () => {
+  const submitFeedback = async () => {
     if (!feedbackTarget) return;
-    // mock：真实环境提交 messageId + 类型 + 说明到反馈接口（契约待冻结）
-    toast("success", `反馈已提交（${feedbackType}${feedbackNote.trim() ? "，含补充说明" : ""}），将进入质量评估闭环`);
-    setFeedbackTarget(null);
+    try {
+      await api.submitChatFeedback({
+        messageId: feedbackTarget.id,
+        kind: feedbackType as "WRONG" | "STALE" | "NO_PERMISSION" | "CITATION",
+        note: feedbackNote.trim() || undefined,
+      });
+      toast("success", "反馈已提交，将进入质量评估闭环");
+    } catch (err: unknown) {
+      toast("error", err instanceof Error ? err.message : "反馈提交失败");
+    } finally {
+      setFeedbackTarget(null);
+    }
   };
   const sessionList = (
     <SessionList
@@ -216,60 +200,37 @@ function ChatPageInner() {
         {sessionList}
       </Card>
       <Card className="chat-main" styles={{ body: { display: "flex", flexDirection: "column", height: "100%", padding: 16 } }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap", paddingBottom: 12, borderBottom: "1px solid var(--border)", marginBottom: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-            <Button type="text" className="chat-sessions-toggle" icon={<MenuOutlined />} aria-label="会话列表" onClick={() => setMobileSessionsOpen(true)} />
-            <div style={{ minWidth: 0 }}>
-              <strong>{activeSession?.title ?? "新会话"}</strong>
-              <span style={{ color: "var(--text-3)", fontSize: 12, marginLeft: 10 }}>
-                范围：{activeSession?.kbIds.length ? `${activeSession.kbIds.length} 个知识库` : scopeKbId ? "当前知识库" : "全部可访问知识库"}
-              </span>
-            </div>
-          </div>
-          <Tag color="processing">回答仅基于你有权限的内容</Tag>
-        </div>
+        <ChatHeader
+          title={activeSession?.title ?? "新会话"}
+          scopeLabel={
+            activeSession?.kbIds.length
+              ? `${activeSession.kbIds.length} 个知识库`
+              : newScopeIds.length
+                ? `${newScopeIds.length} 个知识库`
+                : "全部可访问知识库"
+          }
+          onOpenSessions={() => setMobileSessionsOpen(true)}
+          onOpenScope={() => setScopePickerOpen(true)}
+        />
         <div className="chat-messages" style={{ flex: 1, overflowY: "auto" }}>
-          {loadingMsgs ? (
-            <Loading />
-          ) : messages.length === 0 ? (
-            <Empty description={<span style={{ color: "var(--text-2)" }}>开始提问 · 答案将带来源引用、置信度与新鲜度提示；无权限内容不会出现在回答中</span>} />
-          ) : (
-            messages.map((m) => (
-              <MessageItem
-                key={m.id}
-                msg={m}
-                onGiveFeedback={(v) => giveFeedback(m, v)}
-                onOpenSource={(docId) => router.push(`/documents/${docId}`)}
-                onSendSuggestion={(text) => void send(text)}
-              />
-            ))
-          )}
-          <div ref={bottomRef} />
+          <ChatMessageList
+            messages={messages}
+            loadingMsgs={loadingMsgs}
+            onGiveFeedback={giveFeedback}
+            onOpenSource={(docId) => router.push(`/documents/${docId}`)}
+            onSendSuggestion={(text) => void send(text)}
+            bottomRef={bottomRef}
+          />
         </div>
 
-        <div className="chat-input-area">
-          <Input.TextArea
-            placeholder="输入问题，Enter 发送，Shift+Enter 换行…"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                void send();
-              }
-            }}
-            disabled={sending && !streamTimer.current}
-            autoSize={{ minRows: 2, maxRows: 6 }}
-            style={{ flex: 1 }}
-          />
-          {sending ? (
-            <Button danger onClick={stopStreaming}>停止</Button>
-          ) : (
-            <Button type="primary" icon={<SendOutlined />} disabled={!input.trim()} onClick={() => void send()}>
-              发送
-            </Button>
-          )}
-        </div>
+        <ChatInput
+          value={input}
+          onChange={setInput}
+          onSend={() => void send()}
+          sending={sending}
+          canSend={input.trim().length > 0}
+          onStop={stopStreaming}
+        />
       </Card>
 
       <Drawer title="会话列表" open={mobileSessionsOpen} onClose={() => setMobileSessionsOpen(false)} placement="left" width={280}>
@@ -284,6 +245,13 @@ function ChatPageInner() {
         onNoteChange={setFeedbackNote}
         onClose={() => setFeedbackTarget(null)}
         onSubmit={submitFeedback}
+      />
+
+      <ScopePicker
+        open={scopePickerOpen}
+        value={newScopeIds}
+        onClose={() => setScopePickerOpen(false)}
+        onConfirm={setNewScopeIds}
       />
     </div>
   );

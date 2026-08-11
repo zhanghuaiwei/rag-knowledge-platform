@@ -1,13 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { Avatar, Button, Card, Modal, Pagination, Space, Table, Tabs, Tag } from "antd";
+import { Avatar, Button, Card, Modal, Pagination, Table, Tabs, Tag } from "antd";
 import type { TableColumnsType } from "antd";
 import { PlusOutlined } from "@ant-design/icons";
 
 import { api } from "@/api-client";
-import type { Org, User } from "@/api-client";
-import { Empty, ErrorState, SkeletonRows } from "@/components/async-state";
+import type { User } from "@/api-client";
+import { Empty, ErrorState } from "@/components/async-state";
+import { OrgTreeEditor } from "@/components/org-tree-editor";
 import { useToast } from "@/components/feedback";
 import { formatDateTime } from "@/lib/format";
 import { useAsync } from "@/lib/use-async";
@@ -20,10 +21,8 @@ export default function AdminUsersPage() {
   const [page, setPage] = useState(1);
   const [disableTarget, setDisableTarget] = useState<{ id: number; name: string } | null>(null);
   const [disabling, setDisabling] = useState(false);
-  const [disabledIds, setDisabledIds] = useState<Set<number>>(new Set());
 
   const users = useAsync(() => api.listUsers({ page, size: 10 }), [page]);
-  const orgs = useAsync(() => api.listOrgs(), [tab === "orgs"]);
 
   const columns: TableColumnsType<User> = [
     {
@@ -44,27 +43,24 @@ export default function AdminUsersPage() {
     {
       title: "状态",
       key: "status",
-      render: (_, u) => {
-        const disabled = disabledIds.has(u.id) || u.status === "DISABLED";
-        return <Tag color={disabled ? "error" : "success"}>{disabled ? "已停用" : "正常"}</Tag>;
-      },
+      render: (_, u) => <Tag color={u.status === "DISABLED" ? "error" : "success"}>{u.status === "DISABLED" ? "已停用" : "正常"}</Tag>,
     },
     { title: "最近登录", dataIndex: "lastLoginAt", render: (v: string) => formatDateTime(v) },
     {
       title: "操作",
       key: "action",
-      render: (_, u) => {
-        const disabled = disabledIds.has(u.id) || u.status === "DISABLED";
-        return disabled ? (
+      render: (_, u) =>
+        u.status === "DISABLED" ? (
           <Button
             type="link"
-            onClick={() => {
-              setDisabledIds((prev) => {
-                const next = new Set(prev);
-                next.delete(u.id);
-                return next;
-              });
-              toast("success", `已恢复 ${u.name}（mock）`);
+            onClick={async () => {
+              try {
+                await api.enableUser(u.id);
+                toast("success", `已恢复 ${u.name}`);
+                users.reload();
+              } catch (err: unknown) {
+                toast("error", err instanceof Error ? err.message : "恢复失败");
+              }
             }}
           >
             恢复
@@ -73,20 +69,23 @@ export default function AdminUsersPage() {
           <Button type="link" danger onClick={() => setDisableTarget({ id: u.id, name: u.name })}>
             停用
           </Button>
-        );
-      },
+        ),
     },
   ];
 
-  const confirmDisable = () => {
+  const confirmDisable = async () => {
     if (!disableTarget) return;
     setDisabling(true);
-    setTimeout(() => {
-      setDisabledIds((prev) => new Set(prev).add(disableTarget.id));
-      setDisabling(false);
-      toast("success", `已停用 ${disableTarget.name}，其会话与 API 访问将在目标 SLA 内失效（mock）`);
+    try {
+      await api.disableUser(disableTarget.id);
+      toast("success", `已停用 ${disableTarget.name}，其会话与 API 访问将在目标 SLA 内失效`);
       setDisableTarget(null);
-    }, 600);
+      users.reload();
+    } catch (err: unknown) {
+      toast("error", err instanceof Error ? err.message : "停用失败");
+    } finally {
+      setDisabling(false);
+    }
   };
 
   return (
@@ -135,31 +134,8 @@ export default function AdminUsersPage() {
             </Card>
           ) : null}
         </>
-      ) : orgs.loading ? (
-        <Card>
-          <SkeletonRows rows={5} />
-        </Card>
-      ) : orgs.error ? (
-        <Card>
-          <ErrorState message={orgs.error} onRetry={orgs.reload} />
-        </Card>
-      ) : (orgs.data?.length ?? 0) === 0 ? (
-        <Card>
-          <Empty icon="🏢" title="暂无组织" />
-        </Card>
       ) : (
-        <Card>
-          <Space direction="vertical" style={{ width: "100%" }} size={4}>
-            {(orgs.data ?? []).map((org: Org) => (
-              <div key={org.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", paddingLeft: org.parentId ? 28 : 0 }}>
-                <Tag color="default">{org.name}</Tag>
-                <span style={{ color: "var(--text-3)", fontSize: 13 }}>{org.path}</span>
-                <span style={{ color: "var(--text-2)", fontSize: 13 }}>{org.memberCount} 人</span>
-                <Tag color={org.status === "ACTIVE" ? "success" : "error"}>{org.status === "ACTIVE" ? "正常" : "已停用"}</Tag>
-              </div>
-            ))}
-          </Space>
-        </Card>
+        <OrgTreeEditor />
       )}
 
       <Modal

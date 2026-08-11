@@ -5,110 +5,29 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Avatar, Button, Drawer, Dropdown, Input, Layout, Menu, Tooltip } from "antd";
 import type { MenuProps } from "antd";
 import {
-  ApiOutlined,
   ApartmentOutlined,
-  BarChartOutlined,
   CheckOutlined,
-  DashboardOutlined,
-  DatabaseOutlined,
   DownOutlined,
-  FileDoneOutlined,
-  FileTextOutlined,
-  KeyOutlined,
   LogoutOutlined,
   MenuFoldOutlined,
   MenuOutlined,
   MenuUnfoldOutlined,
-  MessageOutlined,
-  MonitorOutlined,
   MoonOutlined,
-  SafetyCertificateOutlined,
   SearchOutlined,
   SettingOutlined,
   SunOutlined,
-  TeamOutlined,
 } from "@ant-design/icons";
 
 import { api } from "@/api-client";
 import type { CurrentUser } from "@/api-client";
 import { useToast } from "@/components/feedback";
+import { NotificationCenter } from "@/components/notification-center";
+import { TaskCenter } from "@/components/task-center";
 import { useTheme } from "@/components/theme-provider";
 import { ThemeSettings } from "@/components/theme-settings";
+import { buildNav, findSelectedKey, NAV_ICON } from "@/components/nav-config";
 import { clearSession } from "@/lib/auth";
 import { resolveMode } from "@/lib/theme";
-
-type NavIconKey = "dashboard" | "chat" | "search" | "kb" | "doc" | "shield" | "chart" | "monitor" | "users" | "key" | "webhook" | "audit";
-
-interface NavItem {
-  href: string;
-  label: string;
-  icon: NavIconKey;
-}
-
-interface NavGroup {
-  section: string;
-  items: NavItem[];
-}
-
-const NAV_ICON: Record<NavIconKey, ReactNode> = {
-  dashboard: <DashboardOutlined />,
-  chat: <MessageOutlined />,
-  search: <SearchOutlined />,
-  kb: <DatabaseOutlined />,
-  doc: <FileTextOutlined />,
-  shield: <SafetyCertificateOutlined />,
-  chart: <BarChartOutlined />,
-  monitor: <MonitorOutlined />,
-  users: <TeamOutlined />,
-  key: <KeyOutlined />,
-  webhook: <ApiOutlined />,
-  audit: <FileDoneOutlined />,
-};
-
-const NAV: NavGroup[] = [
-  {
-    section: "知识消费",
-    items: [
-      { href: "/dashboard", label: "工作台", icon: "dashboard" },
-      { href: "/chat", label: "智能问答", icon: "chat" },
-      { href: "/search", label: "全文搜索", icon: "search" },
-    ],
-  },
-  {
-    section: "知识资产",
-    items: [
-      { href: "/kbs", label: "知识库", icon: "kb" },
-      { href: "/documents", label: "文档库", icon: "doc" },
-      { href: "/governance/review", label: "治理中心", icon: "shield" },
-    ],
-  },
-  {
-    section: "运营",
-    items: [
-      { href: "/analytics", label: "质量与用量", icon: "chart" },
-      { href: "/screen", label: "数据大屏", icon: "monitor" },
-    ],
-  },
-  {
-    section: "管理中心",
-    items: [
-      { href: "/admin/users", label: "成员与组织", icon: "users" },
-      { href: "/admin/api-keys", label: "API Key", icon: "key" },
-      { href: "/admin/webhooks", label: "Webhook", icon: "webhook" },
-      { href: "/admin/audit", label: "审计日志", icon: "audit" },
-    ],
-  },
-];
-
-const MENU_ITEMS: MenuProps["items"] = NAV.map((group) => ({
-  type: "group",
-  label: group.section,
-  children: group.items.map((item) => ({
-    key: item.href,
-    icon: NAV_ICON[item.icon],
-    label: item.label,
-  })),
-}));
 
 /** mock 租户列表：真实环境由租户成员关系接口返回（待契约）。 */
 const MOCK_TENANTS = [
@@ -138,13 +57,23 @@ export function AppShell({ children }: { children: ReactNode }) {
   const collapsed = config.sidebarCollapsed;
   const dark = resolveMode(config.mode) === "dark";
 
-  const selectedKey = useMemo(
-    () =>
-      NAV.flatMap((g) => g.items).find(
-        (item) => pathname === item.href || pathname.startsWith(`${item.href}/`),
-      )?.href ?? "",
-    [pathname],
-  );
+  // 导航按角色过滤（体验层），管理中心/治理中心对非授权角色隐藏
+  const nav = useMemo(() => buildNav(user ?? { roles: [] }), [user]);
+  const menuItems: MenuProps["items"] = nav.map((group) => ({
+    type: "group",
+    label: group.section,
+    children: group.items.map((item) => ({
+      key: item.href,
+      icon: NAV_ICON[item.icon],
+      label: item.label,
+      children: item.children?.map((child) => ({
+        key: child.href,
+        icon: NAV_ICON[child.icon],
+        label: child.label,
+      })),
+    })),
+  }));
+  const selectedKey = useMemo(() => findSelectedKey(nav, pathname), [nav, pathname]);
 
   const tenantName = MOCK_TENANTS.find((t) => t.id === tenantId)?.name ?? user?.tenantName ?? "";
 
@@ -201,7 +130,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     <Menu
       mode="inline"
       inlineCollapsed={collapsed && !isMobile}
-      items={MENU_ITEMS}
+      items={menuItems}
       selectedKeys={[selectedKey]}
       onClick={navigate}
       style={{ borderInlineEnd: 0, background: "transparent" }}
@@ -253,6 +182,9 @@ export function AppShell({ children }: { children: ReactNode }) {
 
           <div style={{ flex: 1 }} />
 
+          <TaskCenter />
+          <NotificationCenter />
+
           <Dropdown menu={{ items: tenantMenu, onClick: ({ key }) => switchTenant(Number(key)) }} trigger={["click"]}>
             <Button type="text" icon={<ApartmentOutlined />} style={{ maxWidth: 180 }}>
               <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "inline-block", maxWidth: 120 }}>{tenantName}</span>
@@ -290,7 +222,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         title="知识库平台"
         styles={{ body: { padding: 0 } }}
       >
-        <Menu mode="inline" items={MENU_ITEMS} selectedKeys={[selectedKey]} onClick={navigate} style={{ borderInlineEnd: 0 }} />
+        <Menu mode="inline" items={menuItems} selectedKeys={[selectedKey]} onClick={navigate} style={{ borderInlineEnd: 0 }} />
       </Drawer>
     </Layout>
   );

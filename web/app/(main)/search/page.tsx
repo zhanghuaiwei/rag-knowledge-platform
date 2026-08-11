@@ -3,18 +3,33 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
-import { Button, Card, Form, Input, Pagination, Select, Tag } from "antd";
+import { Button, Card, DatePicker, Form, Input, Pagination, Select, Tag } from "antd";
+import type { Dayjs } from "dayjs";
 import { SearchOutlined } from "@ant-design/icons";
 
 import { api } from "@/api-client";
-import type { SearchItem } from "@/api-client";
+import type { SearchItem, SearchSort } from "@/api-client";
 import { Empty, ErrorState, SkeletonRows } from "@/components/async-state";
 import { formatDate } from "@/lib/format";
 import { useAsync } from "@/lib/use-async";
 
+const FILE_TYPES = ["pdf", "docx", "md", "txt", "xlsx", "html"];
+
 interface SearchFormValues {
   keyword?: string;
   kbId?: number;
+  fileType?: string;
+  dateRange?: [Dayjs, Dayjs] | null;
+  sort?: SearchSort;
+}
+
+interface SearchQuery {
+  keyword: string;
+  kbId?: number;
+  fileType?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  sort?: SearchSort;
 }
 
 function highlight(text: string, keyword: string) {
@@ -28,7 +43,7 @@ function SearchPageInner() {
   const searchParams = useSearchParams();
   const [form] = Form.useForm<SearchFormValues>();
   const initialKeyword = searchParams.get("keyword") ?? "";
-  const [query, setQuery] = useState<{ keyword: string; kbId?: number }>({ keyword: initialKeyword });
+  const [query, setQuery] = useState<SearchQuery>({ keyword: initialKeyword });
   const [page, setPage] = useState(1);
 
   const kbs = useAsync(() => api.listKbs({ page: 1, size: 50 }));
@@ -42,7 +57,7 @@ function SearchPageInner() {
     const kw = searchParams.get("keyword")?.trim() ?? "";
     if (kw && kw !== query.keyword) {
       form.setFieldValue("keyword", kw);
-      setQuery((prev) => ({ keyword: kw, kbId: prev.kbId }));
+      setQuery((prev) => ({ ...prev, keyword: kw }));
       setPage(1);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -60,6 +75,10 @@ function SearchPageInner() {
       .search({
         keyword: query.keyword,
         kbIds: query.kbId ? [query.kbId] : undefined,
+        fileType: query.fileType,
+        dateFrom: query.dateFrom,
+        dateTo: query.dateTo,
+        sort: query.sort,
         page,
         size: 8,
       })
@@ -79,8 +98,16 @@ function SearchPageInner() {
 
   const onFinish = (values: SearchFormValues) => {
     const kw = values.keyword?.trim() ?? "";
+    const range = values.dateRange;
     setPage(1);
-    setQuery({ keyword: kw, kbId: values.kbId });
+    setQuery({
+      keyword: kw,
+      kbId: values.kbId,
+      fileType: values.fileType,
+      dateFrom: range?.[0]?.format("YYYY-MM-DD"),
+      dateTo: range?.[1]?.format("YYYY-MM-DD"),
+      sort: values.sort,
+    });
     router.replace(`/search?keyword=${encodeURIComponent(kw)}`);
   };
 
@@ -91,12 +118,12 @@ function SearchPageInner() {
       <div className="page-header">
         <div>
           <h1 className="page-title">全文搜索</h1>
-          <p className="page-desc">搜索结果仅包含你有权查看摘要的内容</p>
+          <p className="page-desc">搜索结果仅包含你有权查看摘要的内容；摘要即 view_excerpt 权限面</p>
         </div>
       </div>
 
       <Card>
-        <Form<SearchFormValues> form={form} layout="inline" onFinish={onFinish} initialValues={{ keyword: initialKeyword }}>
+        <Form<SearchFormValues> form={form} layout="inline" onFinish={onFinish} initialValues={{ keyword: initialKeyword, sort: "RELEVANCE" }}>
           <Form.Item name="keyword" style={{ flex: 1 }}>
             <Input
               prefix={<SearchOutlined />}
@@ -109,8 +136,28 @@ function SearchPageInner() {
             <Select
               placeholder="全部知识库"
               allowClear
-              style={{ minWidth: 180 }}
+              style={{ minWidth: 150 }}
               options={(kbs.data?.items ?? []).map((kb) => ({ value: kb.id, label: kb.name }))}
+            />
+          </Form.Item>
+          <Form.Item name="fileType">
+            <Select
+              placeholder="全部类型"
+              allowClear
+              style={{ minWidth: 110 }}
+              options={FILE_TYPES.map((t) => ({ value: t, label: t.toUpperCase() }))}
+            />
+          </Form.Item>
+          <Form.Item name="dateRange">
+            <DatePicker.RangePicker allowEmpty={[true, true]} />
+          </Form.Item>
+          <Form.Item name="sort">
+            <Select
+              style={{ minWidth: 120 }}
+              options={[
+                { value: "RELEVANCE", label: "按相关度" },
+                { value: "TIME", label: "按时间" },
+              ]}
             />
           </Form.Item>
           <Form.Item>
@@ -123,7 +170,7 @@ function SearchPageInner() {
 
       {!submitted ? (
         <Card>
-          <Empty icon="🔍" title="输入关键词开始搜索" desc="支持按知识库过滤；摘要即 view_excerpt 权限面，打开原文需 view_content" />
+          <Empty icon="🔍" title="输入关键词开始搜索" desc="支持按知识库 / 文件类型 / 日期过滤与排序；打开原文需 view_content" />
         </Card>
       ) : loading ? (
         <Card>
@@ -145,7 +192,7 @@ function SearchPageInner() {
               <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
                 <span className="file-icon">{item.fileExt}</span>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <Link href={`/documents/${item.documentId}`} style={{ fontWeight: 600, color: "var(--primary)" }}>
+                  <Link href={`/documents/${item.documentId}?page=${item.pageNo}`} style={{ fontWeight: 600, color: "var(--primary)" }}>
                     {highlight(item.fileName, submitted)}
                   </Link>
                   <div style={{ fontSize: 12, color: "var(--text-3)", margin: "2px 0 8px" }}>
