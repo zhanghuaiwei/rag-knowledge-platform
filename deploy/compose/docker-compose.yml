@@ -15,13 +15,12 @@
 #
 # 使用：
 #   cd deploy/compose
-#   cp .env.example .env          # 填入实际密码
+#   cp .env.example .env          # 填入真实密码（含 RAGKB_APP_PASSWORD / RAGKB_MIGRATOR_PASSWORD）
 #   docker compose up -d
-#   # 初始化数据库（见 docs/09-部署运维指南.md 与 docs/04-数据库设计.md §9）：
-#   docker compose exec -T postgres psql -U postgres -d postgres \
-#     -v ragkb_app_password='<app密码>' \
-#     -v ragkb_migrator_password='<migrator密码>' \
-#     -f - < ../ddl/init.sql
+#   # PostgreSQL 首次启动（pgdata 卷为空）时自动执行 ../ddl/init.sql 完成初始化：
+#   #   角色 + ragkb 库 + 48 表 + 最小种子，两个业务角色密码经 .env 注入
+#   #   （见 db-init/01-init-db.sh）。重启不重复执行；重建请 docker compose down -v。
+#   # 独立/托管 PostgreSQL 或空库重建时的手动初始化命令见 docs/04-数据库设计.md §9。
 # =====================================================================
 
 name: ragkb
@@ -37,11 +36,17 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required in .env}
       POSTGRES_DB: postgres
       TZ: UTC
+      # 业务角色密码：首次初始化时由 db-init/01-init-db.sh 以 psql -v 传给 init.sql
+      RAGKB_APP_PASSWORD: ${RAGKB_APP_PASSWORD:?RAGKB_APP_PASSWORD required in .env}
+      RAGKB_MIGRATOR_PASSWORD: ${RAGKB_MIGRATOR_PASSWORD:?RAGKB_MIGRATOR_PASSWORD required in .env}
     ports:
       # 仅本机访问；云服务器公网由安全组控制
       - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+      # 首次初始化（仅空 pgdata 卷时执行）：DDL 单文件 + 密码注入包装脚本
+      - ../ddl/init.sql:/db-init/init.sql:ro
+      - ./db-init/01-init-db.sh:/docker-entrypoint-initdb.d/01-init-db.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
       interval: 10s

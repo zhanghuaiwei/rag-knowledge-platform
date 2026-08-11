@@ -100,7 +100,7 @@ curl http://localhost:8080/actuator/health
 由环境变量 `RAGKB_DB_ENABLED` 控制(默认 `false`):
 
 - **关闭**(默认):不创建 DataSource,service 无数据库也能启动(脚手架阶段)。
-- **开启**:按 `spring.datasource.*` 连接 PostgreSQL(`RAGKB_DB_URL / RAGKB_DB_USERNAME / RAGKB_DB_PASSWORD`),注册 MyBatis-Plus 分页/乐观锁拦截器并扫描 Mapper。Schema 由 `../deploy/ddl/init.sql` 人工执行,启动不建表。
+- **开启**:按 `spring.datasource.*` 连接 PostgreSQL(`RAGKB_DB_URL / RAGKB_DB_USERNAME / RAGKB_DB_PASSWORD`),注册 MyBatis-Plus 分页/乐观锁拦截器并扫描 Mapper。Schema 由 `../deploy/ddl/init.sql` 初始化(`deploy/compose` 首次启动自动执行),应用启动不建表。
 - 骨架模板:`adapters/persistence/entity/SysTenant.java`(`@Version` 乐观锁)+ `adapters/persistence/mapper/SysTenantMapper.java`(`BaseMapper`),供后续表复制。
 
 ## 当前实现状态(接口骨架)

@@ -174,7 +174,7 @@ psql -v ragkb_app_password='***' -v ragkb_migrator_password='***' \
      -U postgres -d postgres -f deploy/ddl/init.sql
 ```
 
-> 中间件（PostgreSQL/Redis/MinIO）编排见 [`deploy/compose/`](deploy/compose/)；完整启动顺序见 [`docs/09-部署运维指南.md`](docs/09-部署运维指南.md)。
+> 使用 [`deploy/compose/`](deploy/compose/) 时，PostgreSQL 首次启动会自动执行 `init.sql`（密码取自 `deploy/compose/.env` 的 `RAGKB_APP_PASSWORD` / `RAGKB_MIGRATOR_PASSWORD`）；以下命令适用于独立/托管 PostgreSQL 或空库重建场景。完整启动顺序见 [`docs/09-部署运维指南.md`](docs/09-部署运维指南.md)。
 
 ## 文档导航
 
