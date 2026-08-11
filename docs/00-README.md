@@ -53,9 +53,10 @@
 | 部署、安全、可靠性架构 | [`06-架构方案.md`](06-架构方案.md) | v0.2 评审中 |
 | HTTP/SSE 契约（server） | `api/server.openapi.yaml` | **v0.2 草稿，评审中，未冻结**（89 路径 / 113 操作，覆盖现有 controller 全部路径）；rag-engine 内部契约待补 |
 | 测试与验收 | [`modules/enterprise-generalization/test/README.md`](modules/enterprise-generalization/test/README.md) | 计划，全部 not-run |
-| 新装 Schema | `deploy/ddl/01-schema.sql` | v0.2 文件基线，未执行 |
-| v0.1 扩展迁移 | `deploy/ddl/03-v0.2-enterprise-generalization.sql` | 非破坏性预览，未执行 |
-| RLS 纵深防御 | `deploy/ddl/04-enable-tenant-rls.sql` | 可选启用，需应用先设置 tenant context |
+| 新装 Schema | `deploy/ddl/init.sql` | 单文件一键初始化（角色+库+48表+种子），未执行 |
+| v0.1 扩展迁移 | —（并入 `04-数据库设计.md` §9.2） | 非破坏性 Expand 策略描述，无独立脚本 |
+| RLS 纵深防御 | `deploy/ddl/init.sql` 附录 A | 可选启用，需应用先设置 tenant context |
+| 中间件编排 | `deploy/compose/docker-compose.yml` | PostgreSQL/Redis/MinIO 最小集（2G 实例） |
 | 人工 API 摘要 | [`07-API契约.md`](07-API契约.md) | **v0.1 已废弃**；机器契约唯一权威为 `api/*.openapi.yaml`（当前仍是 v0.1，待评审同步） |
 | 开发计划 | [`10-里程碑与开发计划.md`](10-里程碑与开发计划.md) | **v0.1 已废弃**；其排期基于已被 v0.2 否决的架构（Seata/Milvus/Ollama/密码模式），v0.2 计划待重排 |
 

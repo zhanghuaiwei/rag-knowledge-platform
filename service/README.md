@@ -3,7 +3,7 @@
 > 通用企业知识库平台的 **Java 领域 API 服务**,采用 **模块化单体 + 六边形架构**。当前为 v0.2 接口入口骨架:全部 HTTP 接口、DTO 与错误码已落地,并引入 Spring Security(form/OIDC)与 MyBatis-Plus 数据访问骨架;业务用例仍为人工实现点(未实现时返回 501 `E-9998`)。
 
 - 权威设计:`../docs/03-详细设计.md`、`../docs/05-技术选型.md`
-- 数据库:`../deploy/ddl/`
+- 数据库:`../deploy/ddl/init.sql`（单文件一键初始化，48 张表 + 最小种子）
 
 ## 技术栈
 
@@ -15,7 +15,7 @@
 | Spring Security / OAuth2 Client | 随 Boot 管理(认证开关见下文) |
 | MyBatis-Plus | 3.5.17(spring-boot3 starter + jsqlparser 分页插件) |
 | 构建 | Maven 3.9+ |
-| 数据库 | PostgreSQL 16+(`ragkb.db.enabled` 开关,见 `../deploy/ddl/`) |
+| 数据库 | PostgreSQL 16+(`ragkb.db.enabled` 开关,Schema 见 `../deploy/ddl/init.sql`) |
 
 ## 架构分层
 
@@ -100,7 +100,7 @@ curl http://localhost:8080/actuator/health
 由环境变量 `RAGKB_DB_ENABLED` 控制(默认 `false`):
 
 - **关闭**(默认):不创建 DataSource,service 无数据库也能启动(脚手架阶段)。
-- **开启**:按 `spring.datasource.*` 连接 PostgreSQL(`RAGKB_DB_URL / RAGKB_DB_USERNAME / RAGKB_DB_PASSWORD`),注册 MyBatis-Plus 分页/乐观锁拦截器并扫描 Mapper。Schema 由 `../deploy/ddl/*.sql` 人工执行,启动不建表。
+- **开启**:按 `spring.datasource.*` 连接 PostgreSQL(`RAGKB_DB_URL / RAGKB_DB_USERNAME / RAGKB_DB_PASSWORD`),注册 MyBatis-Plus 分页/乐观锁拦截器并扫描 Mapper。Schema 由 `../deploy/ddl/init.sql` 人工执行,启动不建表。
 - 骨架模板:`adapters/persistence/entity/SysTenant.java`(`@Version` 乐观锁)+ `adapters/persistence/mapper/SysTenantMapper.java`(`BaseMapper`),供后续表复制。
 
 ## 当前实现状态(接口骨架)
@@ -127,5 +127,5 @@ curl http://localhost:8080/actuator/health
 - [x] Spring Security 账号密码登录(form)+ OIDC 模式开关(环境变量切换)
 - [x] MyBatis-Plus 数据访问骨架(`ragkb.db.enabled` 开关 + SysTenant 模板)
 - [ ] 按 v0.2 OpenAPI 冻结契约逐模块实现业务用例(替换 `NotYetImplemented` stub)
-- [ ] 接入 Flyway 管理 `../deploy/ddl/` Schema
+- [ ] 接入 Flyway 管理 `../deploy/ddl/init.sql` Schema
 - [ ] 真实用户/租户体系接入 DB(`sys_user`/`identity_account`/`tenant_member`)

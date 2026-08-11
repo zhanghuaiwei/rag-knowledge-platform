@@ -37,7 +37,7 @@ web/
 
 ## Mock 数据
 
-前端内置一套与 v0.2 数据库设计(`../deploy/ddl/01-schema.sql`)和 API 契约(`../docs/07-API契约.md`)对齐的**完整 mock 数据**,覆盖:
+前端内置一套与 v0.2 数据库设计(`../deploy/ddl/init.sql`)和 API 契约(`../docs/07-API契约.md`)对齐的**完整 mock 数据**,覆盖:
 
 - 知识库(KB)与成员角色
 - 文档、版本与解析状态
