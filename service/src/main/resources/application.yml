@@ -9,6 +9,14 @@ spring:
     username: ${RAGKB_DB_USERNAME:ragkb_app}
     password: ${RAGKB_DB_PASSWORD:}
     driver-class-name: org.postgresql.Driver
+  # Redis：refresh token 族 + access token 黑名单（JWT 认证）。凭证来自环境变量；
+  # deploy/compose 的 REDIS_PASSWORD 由 deploy.sh 生成。连接为惰性，未调用不连接。
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 2s
 
 # MyBatis-Plus 骨架配置（仅在 ragkb.db.enabled=true 时生效）
 mybatis-plus:
@@ -41,7 +49,7 @@ management:
 # 04-数据库设计 接入，凭证一律走环境变量，禁止硬编码。
 
 # rag-engine（Python）对接配置（06-架构方案）；实际对接由人工在
-# adapters/ragengine/RagEngineHttpClient 中实现。
+# modules/rag/adapter/RagEngineHttpClient 中实现。
 rag-engine:
   base-url: ${RAG_ENGINE_BASE_URL:http://rag-engine.ragkb.svc:8000}
   timeout-ms: ${RAG_ENGINE_TIMEOUT_MS:10000}
@@ -67,3 +75,14 @@ ragkb:
       client-id: ${RAGKB_OIDC_CLIENT_ID:}
       client-secret: ${RAGKB_OIDC_CLIENT_SECRET:}
       issuer-uri: ${RAGKB_OIDC_ISSUER_URI:}
+  # JWT（form 模式）：secret 生产必填（>=32 字节随机串，经环境变量注入，禁止硬编码）；
+  # 用户在实现 TokenServiceImpl 时应校验 secret 非空，防止生成弱密钥。
+  jwt:
+    secret: ${RAGKB_JWT_SECRET:}
+    issuer: ${RAGKB_JWT_ISSUER:ragkb}
+    access-ttl: ${RAGKB_JWT_ACCESS_TTL:15m}
+    refresh-ttl: ${RAGKB_JWT_REFRESH_TTL:30d}
+    refresh-cookie-max-age-seconds: ${RAGKB_JWT_REFRESH_COOKIE_MAX_AGE_SECONDS:2592000}
+  # refresh cookie 是否加 Secure：生产 https 置 RAGKB_COOKIE_SECURE=true
+  cookie:
+    secure: ${RAGKB_COOKIE_SECURE:false}
