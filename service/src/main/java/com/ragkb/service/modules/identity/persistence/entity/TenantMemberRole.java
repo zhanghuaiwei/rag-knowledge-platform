@@ -1,10 +1,12 @@
 package com.ragkb.service.modules.identity.persistence.entity;
 
+import com.ragkb.service.common.persistence.BaseAuditEntity;
+
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import java.time.Instant;
-import java.io.Serializable;
+
 
 /**
  * {@code tenant_member_role} 表实体 —— MyBatis-Plus 骨架（对齐 {@code deploy/ddl/init.sql}）。
@@ -19,7 +21,7 @@ import java.io.Serializable;
  * 由数据库默认值（now() 等）填充。本类不含业务逻辑。
  */
 @TableName("tenant_member_role")
-public class TenantMemberRole implements Serializable {
+public class TenantMemberRole extends BaseAuditEntity {
 
     @TableId(type = IdType.AUTO)
     private Long id;
@@ -29,8 +31,6 @@ public class TenantMemberRole implements Serializable {
     private Long userId;
 
     private String role;
-
-    private Instant createdAt;
 
     public Long getId() {
         return id;
@@ -64,11 +64,4 @@ public class TenantMemberRole implements Serializable {
         this.role = role;
     }
 
-    public Instant getCreatedAt() {
-        return createdAt;
-    }
-
-    public void setCreatedAt(Instant createdAt) {
-        this.createdAt = createdAt;
-    }
 }

@@ -1,20 +1,21 @@
 package com.ragkb.service.modules.identity.adapter;
 
 import com.ragkb.service.modules.identity.port.TokenBlacklistPort;
-import com.ragkb.service.util.TodoSupport;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
 
 /**
- * Redis 黑名单适配器（TODO 桩，人工实现）。
+ * Redis access token 黑名单（登出即时失效）。
  *
- * <p>人工实现点（StringRedisTemplate）：{@code SET auth:blk:{jti} "1" EX {ttlSeconds}} 与
- * {@code EXISTS auth:blk:{jti}}；key 前缀 {@code auth:blk:}，TTL = access 剩余有效期。
+ * <p>key 约定 {@code auth:blk:{jti}}，TTL = access 剩余有效期（天然过期清理）。
+ * 非正 TTL（token 已过期）不写入，避免残留脏键。
  */
 @Component
 public class RedisTokenBlacklistAdapter implements TokenBlacklistPort {
+
+    private static final String KEY_PREFIX = "auth:blk:";
 
     private final StringRedisTemplate redis;
 
@@ -24,11 +25,14 @@ public class RedisTokenBlacklistAdapter implements TokenBlacklistPort {
 
     @Override
     public void blacklist(String jti, Duration ttl) {
-        TodoSupport.notImplemented("TokenBlacklistPort#blacklist");
+        if (jti == null || jti.isBlank() || ttl == null || ttl.isNegative() || ttl.isZero()) {
+            return;
+        }
+        redis.opsForValue().set(KEY_PREFIX + jti, "1", ttl);
     }
 
     @Override
     public boolean isBlacklisted(String jti) {
-        return TodoSupport.notImplemented("TokenBlacklistPort#isBlacklisted");
+        return Boolean.TRUE.equals(redis.hasKey(KEY_PREFIX + jti));
     }
 }

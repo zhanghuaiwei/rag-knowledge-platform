@@ -1,10 +1,12 @@
 package com.ragkb.service.modules.knowledge.persistence.entity;
 
+import com.ragkb.service.common.persistence.BaseAuditEntity;
+
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import java.time.Instant;
-import java.io.Serializable;
+
 
 /**
  * {@code index_profile} 表实体 —— MyBatis-Plus 骨架（对齐 {@code deploy/ddl/init.sql}）。
@@ -19,7 +21,7 @@ import java.io.Serializable;
  * 由数据库默认值（now() 等）填充。本类不含业务逻辑。
  */
 @TableName("index_profile")
-public class IndexProfile implements Serializable {
+public class IndexProfile extends BaseAuditEntity {
 
     @TableId(type = IdType.AUTO)
     private Long id;
@@ -51,8 +53,6 @@ public class IndexProfile implements Serializable {
     private String rerankerModel;
 
     private String status;
-
-    private Instant createdAt;
 
     private Instant activatedAt;
 
@@ -176,14 +176,6 @@ public class IndexProfile implements Serializable {
 
     public void setStatus(String status) {
         this.status = status;
-    }
-
-    public Instant getCreatedAt() {
-        return createdAt;
-    }
-
-    public void setCreatedAt(Instant createdAt) {
-        this.createdAt = createdAt;
     }
 
     public Instant getActivatedAt() {

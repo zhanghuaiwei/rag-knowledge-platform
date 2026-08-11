@@ -1,10 +1,12 @@
 package com.ragkb.service.modules.indexing.persistence.entity;
 
+import com.ragkb.service.common.persistence.BaseAuditEntity;
+
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import java.time.Instant;
-import java.io.Serializable;
+
 
 /**
  * {@code chunk_meta} 表实体 —— MyBatis-Plus 骨架（对齐 {@code deploy/ddl/init.sql}）。
@@ -19,7 +21,7 @@ import java.io.Serializable;
  * 由数据库默认值（now() 等）填充。本类不含业务逻辑。
  */
 @TableName("chunk_meta")
-public class ChunkMeta implements Serializable {
+public class ChunkMeta extends BaseAuditEntity {
 
     @TableId(value = "chunk_id", type = IdType.INPUT)
     private String chunkId;
@@ -53,8 +55,6 @@ public class ChunkMeta implements Serializable {
     private Instant sourceUpdatedAt;
 
     private Long policyVersion;
-
-    private Instant createdAt;
 
     public String getChunkId() {
         return chunkId;
@@ -184,11 +184,4 @@ public class ChunkMeta implements Serializable {
         this.policyVersion = policyVersion;
     }
 
-    public Instant getCreatedAt() {
-        return createdAt;
-    }
-
-    public void setCreatedAt(Instant createdAt) {
-        this.createdAt = createdAt;
-    }
 }

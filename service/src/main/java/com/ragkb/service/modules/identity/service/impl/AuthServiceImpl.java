@@ -2,51 +2,84 @@ package com.ragkb.service.modules.identity.service.impl;
 
 import com.ragkb.service.common.exception.ApiException;
 import com.ragkb.service.common.exception.ErrorCode;
-import com.ragkb.service.modules.identity.vo.AuthSessionVo;
-import com.ragkb.service.modules.identity.vo.ApiKeyVo;
-import com.ragkb.service.modules.identity.vo.ApiKeyCreatedVo;
+import com.ragkb.service.config.JwtTokenProperties;
+import com.ragkb.service.modules.access.service.PermissionCatalog;
+import com.ragkb.service.modules.identity.adapter.ApiKeyCrypto;
 import com.ragkb.service.modules.identity.dto.ApiKeyCreateDto;
-import com.ragkb.service.modules.identity.vo.TenantContextVo;
-import com.ragkb.service.modules.identity.vo.TokenResponseVo;
+import com.ragkb.service.modules.identity.port.ApiKeyStorePort;
+import com.ragkb.service.modules.identity.port.IdentityDirectory;
 import com.ragkb.service.modules.identity.port.RefreshTokenStorePort;
 import com.ragkb.service.modules.identity.port.TokenBlacklistPort;
 import com.ragkb.service.modules.identity.service.AuthService;
 import com.ragkb.service.modules.identity.service.TokenService;
-import com.ragkb.service.util.TodoSupport;
+import com.ragkb.service.modules.identity.vo.ApiKeyCreatedVo;
+import com.ragkb.service.modules.identity.vo.ApiKeyVo;
+import com.ragkb.service.modules.identity.vo.AuthSessionVo;
+import com.ragkb.service.modules.identity.vo.TenantContextVo;
+import com.ragkb.service.modules.identity.vo.TokenResponseVo;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.core.Authentication;
-import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.oauth2.core.oidc.user.OidcUser;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * 认证会话用例。
+ * 认证会话用例（form 模式全链路）。
  *
- * <p>基础设施部分（会话概览/登出钩子/授权地址）基于 Spring Security 实现；真实用户体系、
- * 租户映射与 JWT 签发/Redis 吊销由人工实现（见各方法 TODO）。
+ * <p>登录/刷新/登出/切换租户都经 {@link IdentityDirectory} 获取当前真实成员关系，
+ * 不信任客户端自报租户/角色；角色由 {@link PermissionCatalog} 聚合成权限视图返回给前端。
+ * API Key 管理委托 {@link ApiKeyStorePort}（无 DB 时返回明确错误）。
  */
 @Service
 public class AuthServiceImpl implements AuthService {
 
+    /** form 登录的凭证能力（区别于租户角色与最终权限）。 */
+    private static final String CREDENTIAL_SCOPE_WEB = "web";
+
     private final String authMode;
+    private final JwtTokenProperties jwtProperties;
     private final TokenService tokenService;
     private final TokenBlacklistPort blacklistPort;
     private final RefreshTokenStorePort refreshStore;
+    private final IdentityDirectory identityDirectory;
+    private final PermissionCatalog permissionCatalog;
+    private final ApiKeyCrypto apiKeyCrypto;
+    private final ObjectProvider<ApiKeyStorePort> apiKeyStoreProvider;
+
+    /** 进程内幂等去重（{@code tenantId:operation:key} → seen）。⚠️ 全量幂等落 idempotency_record 为人工实现点。 */
+    private final Map<String, Boolean> idempotencySeen = new ConcurrentHashMap<>();
 
     public AuthServiceImpl(
             @Value("${ragkb.auth.mode:form}") String authMode,
+            JwtTokenProperties jwtProperties,
             TokenService tokenService,
             TokenBlacklistPort blacklistPort,
-            RefreshTokenStorePort refreshStore) {
+            RefreshTokenStorePort refreshStore,
+            IdentityDirectory identityDirectory,
+            PermissionCatalog permissionCatalog,
+            ApiKeyCrypto apiKeyCrypto,
+            ObjectProvider<ApiKeyStorePort> apiKeyStoreProvider) {
         this.authMode = authMode;
+        this.jwtProperties = jwtProperties;
         this.tokenService = tokenService;
         this.blacklistPort = blacklistPort;
         this.refreshStore = refreshStore;
+        this.identityDirectory = identityDirectory;
+        this.permissionCatalog = permissionCatalog;
+        this.apiKeyCrypto = apiKeyCrypto;
+        this.apiKeyStoreProvider = apiKeyStoreProvider;
     }
 
     @Override
@@ -60,8 +93,7 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     public void handleCallback(String code, String state) {
-        // OIDC 回调由 Spring Security oauth2Login 完成，此处仅作端点占位；
-        // 需要会话补充逻辑（如首次登录建号）时由人工实现。
+        // OIDC 回调由 Spring Security oauth2Login 完成；会话补充逻辑（首次登录建号）为人工实现点。
     }
 
     @Override
@@ -76,109 +108,219 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     public AuthResult login(Authentication authentication) {
-        // TODO(人工)：组装 TokenService.issue 与 session() 视图；refresh token 返回给 Controller 写 cookie。
-        return TodoSupport.notImplemented("AuthService#login");
+        IdentityDirectory.ResolvedIdentity identity = requireIdentity(resolveSubjectKey(authentication));
+        IdentityDirectory.TenantMembership active = firstActiveMembership(identity.userId());
+        return issueAuthResult(identity, active);
     }
 
     @Override
     public AuthResult refresh(String rawRefreshToken) {
-        // TODO(人工)：TokenService.parseRefresh + RefreshTokenStorePort.verifyAndRotate（复用检测），
-        // 失败吊销整族并抛 UNAUTHORIZED。
-        return TodoSupport.notImplemented("AuthService#refresh");
+        TokenService.JwtPrincipal refresh = tokenService.parseRefresh(rawRefreshToken);
+        String familyId = refresh.refreshFamilyId();
+        String newRefreshJti = UUID.randomUUID().toString();
+        boolean rotated = refreshStore.verifyAndRotate(
+                familyId, refresh.jti(), newRefreshJti, tokenService.refreshTtl());
+        if (!rotated) {
+            // 旧 refresh 被复用（疑似被盗）：Store 已原子吊销整族
+            throw new ApiException(ErrorCode.UNAUTHORIZED, "刷新凭证已失效，请重新登录");
+        }
+        IdentityDirectory.ResolvedIdentity identity = requireIdentity(refresh.subjectKey());
+        IdentityDirectory.TenantMembership active = identityDirectory.membership(identity.userId(), refresh.tenantId())
+                .orElseThrow(() -> new ApiException(ErrorCode.FORBIDDEN, "租户成员关系已变更，请重新登录"));
+        TokenService.TokenPair pair = tokenService.issueRotated(
+                identity.userId(), identity.subjectKey(), List.of(CREDENTIAL_SCOPE_WEB),
+                active.roles(), active.tenantId(), familyId, newRefreshJti);
+        return toAuthResult(pair, buildSession(identity, active));
     }
 
     @Override
     public void logout(String accessToken, String rawRefreshToken) {
-        // TODO(人工)：TokenService.accessJti + blacklistPort.blacklist(jti, 剩余TTL)；
-        // refresh 家族吊销 refreshStore.revoke(familyId)。
-        TodoSupport.notImplemented("AuthService#logout");
+        // access 黑名单：宽容读取 jti（已过期也能取），TTL 用 accessTtl 兜底（安全，不长于 token 寿命）
+        String jti = tokenService.accessJti(accessToken);
+        if (jti != null) {
+            blacklistPort.blacklist(jti, tokenService.accessTtl());
+        }
+        // refresh 家族吊销（幂等：凭证无效则忽略）
+        if (rawRefreshToken != null && !rawRefreshToken.isBlank()) {
+            try {
+                refreshStore.revoke(tokenService.parseRefresh(rawRefreshToken).refreshFamilyId());
+            } catch (ApiException ignored) {
+                // 幂等登出：无效 refresh 无需吊销
+            }
+        }
     }
 
     @Override
-    public AuthSessionVo switchTenant(long tenantId) {
-        // TODO 按 03-详细设计 §4 校验租户成员后切换激活租户。
-        return TodoSupport.notImplemented("AuthService#switchTenant");
+    public AuthResult switchTenant(long tenantId) {
+        TokenService.JwtPrincipal principal = currentPrincipal();
+        IdentityDirectory.ResolvedIdentity identity = requireIdentity(principal.subjectKey());
+        IdentityDirectory.TenantMembership active = identityDirectory.membership(identity.userId(), tenantId)
+                .orElseThrow(() -> new ApiException(ErrorCode.FORBIDDEN, "无权切换到该租户"));
+        // JWT 模式：重签含新 tenantId 的 access + 新家族 refresh（旧上下文随新 token 失效）
+        TokenService.TokenPair pair = tokenService.issue(
+                identity.userId(), identity.subjectKey(),
+                principal.scopes().isEmpty() ? List.of(CREDENTIAL_SCOPE_WEB) : principal.scopes(),
+                active.roles(), active.tenantId());
+        refreshStore.save(pair.refreshFamilyId(), pair.refreshJti(), tokenService.refreshTtl());
+        return toAuthResult(pair, buildSession(identity, active));
     }
 
-    // ---------- API Key（人工实现落库与签名校验） ----------
+    // ---------- API Key（委托 ApiKeyStorePort；无 DB 时明确报错） ----------
 
     @Override
     public List<ApiKeyVo> listApiKeys() {
-        return TodoSupport.notImplemented("AuthService#listApiKeys");
+        ApiKeyStorePort store = requireApiKeyStore();
+        long tenantId = currentPrincipal().tenantId();
+        return store.list(tenantId).stream().map(this::toApiKeyVo).toList();
     }
 
     @Override
     public ApiKeyCreatedVo createApiKey(ApiKeyCreateDto request, String idempotencyKey) {
-        return TodoSupport.notImplemented("AuthService#createApiKey");
+        ApiKeyStorePort store = requireApiKeyStore();
+        TokenService.JwtPrincipal principal = currentPrincipal();
+        guardIdempotency(principal.tenantId(), "createApiKey", idempotencyKey);
+        String raw = apiKeyCrypto.generateSecret();
+        long keyId = store.create(new ApiKeyStorePort.CreateCommand(
+                principal.tenantId(), request.name(), request.scopes(), request.allowedKbIds(),
+                request.expiresAt(), principal.userId(),
+                apiKeyCrypto.digest(raw), apiKeyCrypto.prefix(raw), 60));
+        ApiKeyStorePort.ApiKeyRecord record = store.findById(principal.tenantId(), keyId)
+                .orElseThrow(() -> new ApiException(ErrorCode.INTERNAL_ERROR, "API Key 创建后读取失败"));
+        return new ApiKeyCreatedVo(toApiKeyVo(record), raw);
     }
 
     @Override
     public void revokeApiKey(long keyId) {
-        TodoSupport.notImplemented("AuthService#revokeApiKey");
+        ApiKeyStorePort store = requireApiKeyStore();
+        long tenantId = currentPrincipal().tenantId();
+        store.findById(tenantId, keyId)
+                .orElseThrow(() -> new ApiException(ErrorCode.NOT_FOUND, "API Key 不存在"));
+        store.revoke(tenantId, keyId);
     }
 
     @Override
     public ApiKeyCreatedVo rotateApiKey(long keyId, String idempotencyKey) {
-        return TodoSupport.notImplemented("AuthService#rotateApiKey");
+        ApiKeyStorePort store = requireApiKeyStore();
+        long tenantId = currentPrincipal().tenantId();
+        store.findById(tenantId, keyId)
+                .orElseThrow(() -> new ApiException(ErrorCode.NOT_FOUND, "API Key 不存在"));
+        String raw = apiKeyCrypto.generateSecret();
+        store.updateDigestAndPrefix(tenantId, keyId, apiKeyCrypto.digest(raw), apiKeyCrypto.prefix(raw));
+        ApiKeyStorePort.ApiKeyRecord record = store.findById(tenantId, keyId).orElseThrow();
+        return new ApiKeyCreatedVo(toApiKeyVo(record), raw);
     }
 
     // ---------- 内部工具 ----------
 
+    private ApiKeyStorePort requireApiKeyStore() {
+        ApiKeyStorePort store = apiKeyStoreProvider.getIfAvailable();
+        if (store == null) {
+            throw new ApiException(ErrorCode.INTERNAL_ERROR, "API Key 需要启用数据库（RAGKB_DB_ENABLED=true）");
+        }
+        return store;
+    }
+
+    private void guardIdempotency(long tenantId, String operation, String idempotencyKey) {
+        if (idempotencyKey == null || idempotencyKey.isBlank()) {
+            return;
+        }
+        String dedupeKey = tenantId + ":" + operation + ":" + idempotencyKey;
+        if (idempotencySeen.putIfAbsent(dedupeKey, Boolean.TRUE) != null) {
+            throw new ApiException(ErrorCode.CONFLICT, "重复的幂等请求，请使用新幂等键");
+        }
+    }
+
+    private ApiKeyVo toApiKeyVo(ApiKeyStorePort.ApiKeyRecord record) {
+        return new ApiKeyVo(record.id(), record.name(), record.keyPrefix(), record.scopes(),
+                record.allowedKbIds(), record.status(), record.expiresAt(), record.lastUsedAt(),
+                record.createdAt());
+    }
+
+    private TokenService.JwtPrincipal currentPrincipal() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || !(authentication.getPrincipal() instanceof TokenService.JwtPrincipal principal)) {
+            throw new ApiException(ErrorCode.UNAUTHORIZED, "未认证或登录已过期");
+        }
+        return principal;
+    }
+
+    private AuthResult issueAuthResult(IdentityDirectory.ResolvedIdentity identity,
+                                       IdentityDirectory.TenantMembership active) {
+        TokenService.TokenPair pair = tokenService.issue(
+                identity.userId(), identity.subjectKey(), List.of(CREDENTIAL_SCOPE_WEB),
+                active.roles(), active.tenantId());
+        refreshStore.save(pair.refreshFamilyId(), pair.refreshJti(), tokenService.refreshTtl());
+        return toAuthResult(pair, buildSession(identity, active));
+    }
+
+    private AuthResult toAuthResult(TokenService.TokenPair pair, AuthSessionVo session) {
+        long expiresIn = Math.max(0, pair.accessExpiresAt().getEpochSecond() - Instant.now().getEpochSecond());
+        TokenResponseVo response = new TokenResponseVo(pair.accessToken(), "Bearer", expiresIn, session);
+        return new AuthResult(response, pair.refreshToken(),
+                Duration.ofSeconds(jwtProperties.refreshCookieMaxAgeSeconds()));
+    }
+
+    private AuthSessionVo buildSession(IdentityDirectory.ResolvedIdentity identity,
+                                       IdentityDirectory.TenantMembership active) {
+        List<TenantContextVo> tenants = identityDirectory.memberships(identity.userId()).stream()
+                .map(member -> new TenantContextVo(member.tenantId(), member.tenantCode(), member.roles()))
+                .toList();
+        TenantContextVo activeTenant = new TenantContextVo(active.tenantId(), active.tenantCode(), active.roles());
+        Set<String> permissionSet = permissionCatalog.permissionsForRoles(active.roles());
+        List<String> permissions = new ArrayList<>(permissionSet);
+        List<String> features = new ArrayList<>(permissionCatalog.featuresFor(permissionSet));
+        return new AuthSessionVo(
+                identity.userId(),
+                identity.subjectKey(),
+                identity.displayName(),
+                activeTenant,
+                tenants,
+                active.roles(),
+                List.of(CREDENTIAL_SCOPE_WEB),
+                permissions,
+                features,
+                active.policyVersion());
+    }
+
     private AuthSessionVo toAuthSession(Authentication authentication) {
-        if (authentication.getPrincipal() instanceof OidcUser oidcUser) {
-            return fromOidc(oidcUser, authentication);
-        }
-        if (authentication.getPrincipal() instanceof UserDetails userDetails) {
-            return fromFormUser(userDetails, authentication);
-        }
+        IdentityDirectory.ResolvedIdentity identity = requireIdentity(resolveSubjectKey(authentication));
+        long tenantId = activeTenantIdOf(authentication, identity);
+        IdentityDirectory.TenantMembership active = identityDirectory.membership(identity.userId(), tenantId)
+                .orElseThrow(() -> new ApiException(ErrorCode.FORBIDDEN, "租户成员关系已变更，请重新登录"));
+        return buildSession(identity, active);
+    }
+
+    private long activeTenantIdOf(Authentication authentication, IdentityDirectory.ResolvedIdentity identity) {
         if (authentication.getPrincipal() instanceof TokenService.JwtPrincipal principal) {
-            return authSessionFromJwt(principal, authentication);
+            return principal.tenantId();
+        }
+        return firstActiveMembership(identity.userId()).tenantId();
+    }
+
+    private IdentityDirectory.TenantMembership firstActiveMembership(long userId) {
+        return identityDirectory.memberships(userId).stream()
+                .filter(member -> "ACTIVE".equals(member.status()))
+                .findFirst()
+                .orElseThrow(() -> new ApiException(ErrorCode.FORBIDDEN, "当前无可用租户"));
+    }
+
+    private IdentityDirectory.ResolvedIdentity requireIdentity(String subjectKey) {
+        return identityDirectory.resolveBySubjectKey(subjectKey)
+                .orElseThrow(() -> new ApiException(ErrorCode.UNAUTHORIZED, "用户不存在或已停用"));
+    }
+
+    private String resolveSubjectKey(Authentication authentication) {
+        Object principal = authentication.getPrincipal();
+        if (principal instanceof OidcUser oidcUser) {
+            String issuer = oidcUser.getIssuer() != null ? oidcUser.getIssuer().toString() : "oidc";
+            return issuer + "|" + oidcUser.getSubject();
+        }
+        if (principal instanceof UserDetails userDetails) {
+            return "form|" + userDetails.getUsername();
+        }
+        if (principal instanceof TokenService.JwtPrincipal jwtPrincipal) {
+            return jwtPrincipal.subjectKey();
         }
         throw new ApiException(ErrorCode.UNAUTHORIZED, "无法识别的登录主体");
-    }
-
-    private AuthSessionVo fromOidc(OidcUser oidcUser, Authentication authentication) {
-        String issuer = oidcUser.getIssuer() != null ? oidcUser.getIssuer().toString() : "oidc";
-        String subjectKey = issuer + "|" + oidcUser.getSubject();
-        String displayName = oidcUser.getPreferredUsername() != null
-                ? oidcUser.getPreferredUsername() : oidcUser.getName();
-        List<String> scopes = authorities(authentication);
-        // TODO(人工)：按 03-详细设计 将 subjectKey 映射到全局用户(sys_user)与激活租户，再从成员表取租户角色
-        TenantContextVo defaultTenant = new TenantContextVo(1L, "default", "MEMBER");
-        return new AuthSessionVo(hashId(subjectKey), subjectKey, displayName,
-                defaultTenant, List.of(defaultTenant), scopes);
-    }
-
-    private AuthSessionVo fromFormUser(UserDetails userDetails, Authentication authentication) {
-        String username = userDetails.getUsername();
-        List<String> scopes = authorities(authentication);
-        String tenantRole = scopes.stream()
-                .map(scope -> scope.replace("ROLE_", ""))
-                .findFirst()
-                .orElse("MEMBER");
-        TenantContextVo tenant = new TenantContextVo(1L, "default", tenantRole);
-        return new AuthSessionVo(hashId(username), "form|" + username, username,
-                tenant, List.of(tenant), scopes);
-    }
-
-    /**
-     * JWT 主体 → 会话视图（TODO 桩，人工实现）。
-     *
-     * <p>人工实现点：将 {@link TokenService.JwtPrincipal} 的 userId/subjectKey 映射到全局用户与
-     * 激活租户，再从成员表取租户角色；骨架不固化 scopes→角色的信任边界（见交付说明）。
-     */
-    private AuthSessionVo authSessionFromJwt(TokenService.JwtPrincipal principal, Authentication authentication) {
-        return TodoSupport.notImplemented("AuthServiceImpl#authSessionFromJwt");
-    }
-
-    private List<String> authorities(Authentication authentication) {
-        return authentication.getAuthorities().stream()
-                .map(GrantedAuthority::getAuthority)
-                .toList();
-    }
-
-    /** 稳定非负的本地用户标识（开发映射；真实 userId 由人工按用户表落库）。 */
-    private long hashId(String key) {
-        return Integer.toUnsignedLong(key.hashCode()) + 1;
     }
 }

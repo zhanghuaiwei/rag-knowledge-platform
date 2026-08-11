@@ -1,11 +1,13 @@
 package com.ragkb.service.modules.conversation.persistence.entity;
 
+import com.ragkb.service.common.persistence.BaseAuditEntity;
+
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.baomidou.mybatisplus.annotation.Version;
 import java.time.Instant;
-import java.io.Serializable;
+
 
 /**
  * {@code chat_session} 表实体 —— MyBatis-Plus 骨架（对齐 {@code deploy/ddl/init.sql}）。
@@ -20,7 +22,7 @@ import java.io.Serializable;
  * 由数据库默认值（now() 等）填充。本类不含业务逻辑。
  */
 @TableName("chat_session")
-public class ChatSession implements Serializable {
+public class ChatSession extends BaseAuditEntity {
 
     @TableId(type = IdType.AUTO)
     private Long id;
@@ -32,12 +34,6 @@ public class ChatSession implements Serializable {
     private String title;
 
     private String status;
-
-    private Instant createdAt;
-
-    private Instant updatedAt;
-
-    private Instant deletedAt;
 
     @Version
     private Long rowVersion;
@@ -80,30 +76,6 @@ public class ChatSession implements Serializable {
 
     public void setStatus(String status) {
         this.status = status;
-    }
-
-    public Instant getCreatedAt() {
-        return createdAt;
-    }
-
-    public void setCreatedAt(Instant createdAt) {
-        this.createdAt = createdAt;
-    }
-
-    public Instant getUpdatedAt() {
-        return updatedAt;
-    }
-
-    public void setUpdatedAt(Instant updatedAt) {
-        this.updatedAt = updatedAt;
-    }
-
-    public Instant getDeletedAt() {
-        return deletedAt;
-    }
-
-    public void setDeletedAt(Instant deletedAt) {
-        this.deletedAt = deletedAt;
     }
 
     public Long getRowVersion() {

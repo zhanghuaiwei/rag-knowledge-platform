@@ -1,6 +1,7 @@
 package com.ragkb.service.config;
 
 import com.ragkb.service.common.exception.ApiException;
+import com.ragkb.service.modules.access.service.PermissionCatalog;
 import com.ragkb.service.modules.identity.port.TokenBlacklistPort;
 import com.ragkb.service.modules.identity.service.TokenService;
 import jakarta.servlet.FilterChain;
@@ -29,10 +30,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final TokenService tokenService;
     private final TokenBlacklistPort blacklistPort;
+    private final PermissionCatalog permissionCatalog;
 
-    public JwtAuthenticationFilter(TokenService tokenService, TokenBlacklistPort blacklistPort) {
+    public JwtAuthenticationFilter(TokenService tokenService, TokenBlacklistPort blacklistPort,
+                                   PermissionCatalog permissionCatalog) {
         this.tokenService = tokenService;
         this.blacklistPort = blacklistPort;
+        this.permissionCatalog = permissionCatalog;
     }
 
     @Override
@@ -50,7 +54,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 sendUnauthorized(response);
                 return;
             }
-            var authorities = principal.scopes().stream()
+            // 方法级授权基于稳定权限码（角色→权限集中在 PermissionCatalog 展开），
+            // 而非原始 credential scope，支撑 @PreAuthorize("hasAuthority('api-key:manage')")。
+            var authorities = permissionCatalog.permissionsForRoles(principal.tenantRoles()).stream()
                     .map(SimpleGrantedAuthority::new)
                     .toList();
             var authentication = new UsernamePasswordAuthenticationToken(principal, token, authorities);

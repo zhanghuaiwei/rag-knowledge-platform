@@ -115,9 +115,17 @@ public class AuthController {
         return ApiResponse.ok(authService.session());
     }
 
+    /**
+     * 切换当前激活租户（JWT 模式）：服务端校验成员关系后重签 access + refresh，
+     * 返回新 TokenResponse（含新租户上下文），refresh 重新写 HttpOnly cookie。
+     */
     @PostMapping("/api/v1/auth/tenant/switch")
-    public ApiResponse<AuthSessionVo> switchTenant(@Valid @RequestBody SwitchTenantDto request) {
-        return ApiResponse.ok(authService.switchTenant(request.tenantId()));
+    public ApiResponse<TokenResponseVo> switchTenant(
+            @Valid @RequestBody SwitchTenantDto request,
+            HttpServletResponse servletResponse) {
+        AuthResult result = authService.switchTenant(request.tenantId());
+        writeRefreshCookie(servletResponse, result.refreshToken(), result.refreshCookieMaxAge());
+        return ApiResponse.ok(result.response());
     }
 
     // ---------- refresh cookie 写入/清除 ----------

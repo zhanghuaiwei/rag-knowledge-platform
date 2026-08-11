@@ -1,5 +1,7 @@
 package com.ragkb.service.modules.tenant.persistence.entity;
 
+import com.ragkb.service.common.persistence.BaseAuditEntity;
+
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
@@ -22,7 +24,7 @@ import java.time.Instant;
  * 不要在本骨架类里加业务逻辑。insert 时 null 字段不落 SQL，由数据库默认值（now() 等）填充。
  */
 @TableName("sys_tenant")
-public class SysTenant {
+public class SysTenant extends BaseAuditEntity {
 
     @TableId(type = IdType.AUTO)
     private Long id;
@@ -38,10 +40,6 @@ public class SysTenant {
     private String status;
 
     private Long policyVersion;
-
-    private Instant createdAt;
-
-    private Instant updatedAt;
 
     @Version
     private Long rowVersion;
@@ -100,22 +98,6 @@ public class SysTenant {
 
     public void setPolicyVersion(Long policyVersion) {
         this.policyVersion = policyVersion;
-    }
-
-    public Instant getCreatedAt() {
-        return createdAt;
-    }
-
-    public void setCreatedAt(Instant createdAt) {
-        this.createdAt = createdAt;
-    }
-
-    public Instant getUpdatedAt() {
-        return updatedAt;
-    }
-
-    public void setUpdatedAt(Instant updatedAt) {
-        this.updatedAt = updatedAt;
     }
 
     public Long getRowVersion() {
