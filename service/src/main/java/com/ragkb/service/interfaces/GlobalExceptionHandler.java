@@ -7,6 +7,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -37,6 +39,22 @@ public class GlobalExceptionHandler {
                 .orElse(ErrorCode.BAD_REQUEST.getMessage());
         return ResponseEntity.badRequest()
                 .body(ApiResponse.error(ErrorCode.BAD_REQUEST.getCode(), message));
+    }
+
+    /** 账号密码登录失败：用户名或密码错误 → 401（不泄漏具体哪一项错）。 */
+    @ExceptionHandler(org.springframework.security.core.AuthenticationException.class)
+    public ResponseEntity<ApiResponse<Void>> handleAuthentication(AuthenticationException ex) {
+        log.info("authentication failed: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(ApiResponse.error(ErrorCode.UNAUTHORIZED.getCode(), "用户名或密码错误"));
+    }
+
+    /** 已认证但无权限（如方法级 @PreAuthorize 拒绝）→ 403。 */
+    @ExceptionHandler(org.springframework.security.access.AccessDeniedException.class)
+    public ResponseEntity<ApiResponse<Void>> handleAccessDenied(AccessDeniedException ex) {
+        log.warn("access denied: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .body(ApiResponse.error(ErrorCode.FORBIDDEN.getCode(), ErrorCode.FORBIDDEN.getMessage()));
     }
 
     /**

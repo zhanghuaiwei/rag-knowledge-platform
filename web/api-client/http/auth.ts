@@ -3,7 +3,7 @@
  * 后端返回 AuthSession，映射为前端 CurrentUser。
  */
 import type { AuthApi } from "@/api-client/contracts/auth";
-import type { CurrentUser } from "@/api-client/types";
+import type { CurrentUser, LoginInput } from "@/api-client/types";
 import { request } from "@/api-client/http/client";
 
 /** 后端 AuthSession 形状（OpenAPI components/schemas/AuthSession）。 */
@@ -32,6 +32,16 @@ function mapCurrentUser(session: AuthSession): CurrentUser {
 export const authApi: AuthApi = {
   async getCurrentUser() {
     const session = await request<AuthSession>({ method: "GET", url: "/auth/session" });
+    return mapCurrentUser(session);
+  },
+
+  /** 账号密码登录（form 模式）：成功后后端签发会话 cookie，后续请求自动携带。 */
+  async login(input: LoginInput) {
+    const session = await request<AuthSession>({
+      method: "POST",
+      url: "/auth/login",
+      data: { username: input.username, password: input.password },
+    });
     return mapCurrentUser(session);
   },
 };
