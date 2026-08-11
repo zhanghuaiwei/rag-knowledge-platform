@@ -21,7 +21,7 @@ import javax.sql.DataSource;
  * PostgreSQL，注册 MyBatis-Plus 拦截器，并扫描 Mapper 接口。
  *
  * <p>连接凭证一律走环境变量（{@code RAGKB_DB_URL / RAGKB_DB_USERNAME / RAGKB_DB_PASSWORD}），
- * 禁止硬编码。Schema 由 {@code deploy/ddl/*.sql} 人工执行，本配置不做启动建表。
+ * 禁止硬编码。Schema 由 {@code deploy/ddl/init.sql} 人工执行，本配置不做启动建表。
  *
  * <p>⚠️ 骨架说明：本类只负责基础设施（连接池/分页/乐观锁/Mapper 扫描），
  * 不含任何业务逻辑。业务数据访问由人工在 {@code adapters/persistence/} 下实现。
@@ -53,7 +53,7 @@ public class DatabaseConfig {
      * MyBatis-Plus 拦截器：分页 + 乐观锁。
      *
      * <p>乐观锁：实体 {@code row_version} 字段标 {@code @Version}，更新时自动加 1，
-     * 版本不符则更新 0 行（防并发覆盖）。多租户隔离由数据库 RLS 承担（04-enable-tenant-rls.sql），
+     * 版本不符则更新 0 行（防并发覆盖）。多租户隔离由数据库 RLS 承担（deploy/ddl/init.sql 附录 A），
      * 应用层不引入 TenantLine 拦截器，避免与 RLS 双重约束冲突。
      */
     @Bean

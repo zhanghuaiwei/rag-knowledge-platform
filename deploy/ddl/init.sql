@@ -1,16 +1,110 @@
 -- =====================================================================
--- 通用企业知识库平台 · PostgreSQL Schema（v0.2，新装基线）
+-- 通用企业知识库平台 · PostgreSQL 一键初始化（v0.2，唯一新装脚本）
+-- 目标：PostgreSQL 16+，仅适用于自管 PostgreSQL；托管数据库请用平台控制面。
+--
+-- 本脚本为「一条命令完成新装」的全量初始化，顺序：
+--   1. 建角色 ragkb_owner / ragkb_migrator / ragkb_app
+--   2. 建库 ragkb 并设置默认权限
+--   3. 建 Schema：set_updated_at() 函数 + 48 张业务表 + 触发器 + 运行时权限
+--   4. 写入最小安全种子（默认租户 + DRAFT 模型档案）
+--
+-- 执行示例（密码通过 psql 变量传入，不写入仓库/命令历史）：
+--   psql -v ragkb_app_password='***' \
+--        -v ragkb_migrator_password='***' \
+--        -U postgres -d postgres -f deploy/ddl/init.sql
+--
+-- ⚠️ 一次性脚本（非幂等）：重复执行会因已存在对象报错；重装需先清空数据库。
+-- 权威设计：docs/04-数据库设计.md
+--
+-- 说明（已收敛，不再提供独立脚本）：
+--   * v0.1 → v0.2 迁移（Expand → Migrate → Contract）见 docs/04-数据库设计.md §9.2
+--   * 可选 RLS 纵深防御的启用 SQL 见本文件末尾「附录 A」（仅注释），详见 §6
+--   * Seata / undo_log 已废弃，本脚本不创建 undo_log
+-- =====================================================================
+
+\set ON_ERROR_STOP on
+-- =====================================================================
+-- 第 1 步：创建角色与数据库（原 00-create-database.sql 内容并入本文件）
+--
+-- 创建：
+--   ragkb_owner     NOLOGIN，拥有 schema/table
+--   ragkb_migrator  LOGIN，可 SET ROLE ragkb_owner 执行迁移
+--   ragkb_app       LOGIN，仅运行时 DML，无 DDL/BYPASSRLS
+-- =====================================================================
+
+
+\if :{?ragkb_app_password}
+\else
+  \echo 'ERROR: missing -v ragkb_app_password'
+  \quit
+\endif
+
+\if :{?ragkb_migrator_password}
+\else
+  \echo 'ERROR: missing -v ragkb_migrator_password'
+  \quit
+\endif
+
+SELECT 'CREATE ROLE ragkb_owner NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT'
+WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ragkb_owner')\gexec
+
+SELECT format(
+    'CREATE ROLE ragkb_migrator LOGIN PASSWORD %L NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT',
+    :'ragkb_migrator_password'
+)
+WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ragkb_migrator')\gexec
+
+SELECT format(
+    'CREATE ROLE ragkb_app LOGIN PASSWORD %L NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS INHERIT',
+    :'ragkb_app_password'
+)
+WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ragkb_app')\gexec
+
+GRANT ragkb_owner TO ragkb_migrator;
+
+SELECT 'CREATE DATABASE ragkb OWNER ragkb_owner ENCODING ''UTF8'' TEMPLATE template0'
+WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'ragkb')\gexec
+
+ALTER ROLE ragkb_app SET timezone TO 'UTC';
+ALTER ROLE ragkb_migrator SET timezone TO 'UTC';
+GRANT CONNECT ON DATABASE ragkb TO ragkb_app, ragkb_migrator;
+
+\connect ragkb
+
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+REVOKE ALL ON DATABASE ragkb FROM PUBLIC;
+GRANT CONNECT ON DATABASE ragkb TO ragkb_app, ragkb_migrator;
+ALTER SCHEMA public OWNER TO ragkb_owner;
+GRANT USAGE ON SCHEMA public TO ragkb_app;
+
+SET ROLE ragkb_owner;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ragkb_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+    GRANT USAGE, SELECT ON SEQUENCES TO ragkb_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+    GRANT EXECUTE ON FUNCTIONS TO ragkb_app;
+RESET ROLE;
+
+-- 校验（只读）：
+--   SELECT rolname, rolsuper, rolcreatedb, rolcreaterole, rolbypassrls
+--   FROM pg_roles WHERE rolname LIKE 'ragkb_%' ORDER BY rolname;
+--
+-- 后续：第 2 步在建好的 ragkb 库中创建 Schema（见下方）；应用连接只使用
+-- ragkb_app。密码轮换请通过 Secret Manager/数据库运维流程完成。
+
+-- =====================================================================
+-- 第 2 步：Schema（原 01-schema.sql 内容并入本文件，v0.2 新装基线）
 -- 目标：PostgreSQL 16+
 -- 权威设计：docs/04-数据库设计.md
 --
 -- 安全边界：
 --   * tenant 资源使用 tenant_id + 复合外键阻止跨租户关联
 --   * ragkb_owner 拥有对象；ragkb_app 仅 DML 且无 BYPASSRLS
---   * RLS 在应用设置 tenant context 后由 04-enable-tenant-rls.sql 启用
+--   * 可选 RLS 在应用设置 tenant context 后，按本文件末尾「附录 A」启用
 --   * 原文/密钥不存本 Schema；仅保存 object_key、secret_ref 或不可逆摘要
 -- =====================================================================
 
-\set ON_ERROR_STOP on
 SET ROLE ragkb_owner;
 BEGIN;
 
@@ -1341,4 +1435,136 @@ RESET ROLE;
 --   SELECT conrelid::regclass, conname FROM pg_constraint
 --   WHERE contype IN ('f','c') ORDER BY conrelid::regclass::text, conname;
 --
--- 启用 RLS 前必须验证应用为每个事务设置 app.tenant_id，见 04-enable-tenant-rls.sql。
+-- 启用 RLS 前必须验证应用为每个事务设置 app.tenant_id，见本文件末尾「附录 A」。
+-- =====================================================================
+-- 第 3 步：最小安全种子（原 02-seed-data.sql 内容并入本文件，v0.2）
+--
+-- 仅用于本地/私有化新装后的结构自检：
+--   * 不创建默认密码、管理员、API Key、模型密钥或外部连接
+--   * 生产租户、身份源和管理员必须通过受审计的控制面创建
+--   * 模型 revision 必须在投产前替换为部署侧锁定的真实版本/摘要
+-- =====================================================================
+
+
+SET ROLE ragkb_owner;
+BEGIN;
+
+INSERT INTO sys_tenant (
+    id, code, name, deployment_mode, data_region, status
+) VALUES (
+    1, 'default', 'Default Tenant', 'PRIVATE', 'default', 'ACTIVE'
+) ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO index_profile (
+    id,
+    tenant_id,
+    name,
+    profile_version,
+    embedding_provider,
+    embedding_model,
+    model_revision,
+    embedding_dimension,
+    normalization,
+    distance_metric,
+    chunker_config,
+    analyzer_config,
+    status,
+    activated_at
+) VALUES (
+    1,
+    1,
+    'default-multilingual-1024',
+    1,
+    'embedding.default',
+    'bge-m3',
+    'deployment-pinned',
+    1024,
+    'L2',
+    'COSINE',
+    '{"strategy":"structure-aware","maxTokens":512,"overlapTokens":50}'::jsonb,
+    '{"language":"multilingual"}'::jsonb,
+    'DRAFT',
+    NULL
+) ON CONFLICT (id) DO NOTHING;
+
+SELECT setval(
+    pg_get_serial_sequence('sys_tenant', 'id'),
+    GREATEST((SELECT max(id) FROM sys_tenant), 1),
+    true
+);
+SELECT setval(
+    pg_get_serial_sequence('index_profile', 'id'),
+    GREATEST((SELECT max(id) FROM index_profile), 1),
+    true
+);
+
+COMMIT;
+RESET ROLE;
+
+\echo 'Minimal seed applied. Create identity providers and administrators through the audited control plane.'
+
+-- =====================================================================
+-- 附录 A（注释，不执行）：可选 PostgreSQL RLS 加固
+--
+-- RLS 是纵深防御，不替代应用层 subject/role/ACL/policy 校验。
+-- 前置门禁（满足后才可启用）：
+--   1. 仅在新装 v0.2 Schema 上执行；
+--   2. 应用已在每个业务事务内、鉴权成功后执行：
+--        SET LOCAL app.tenant_id = '<verified-tenant-id>';
+--   3. 连接池归还连接前有自动清理与跨租户回归测试；
+--   4. ragkb_app 不拥有表且没有 BYPASSRLS。
+--
+-- 启用步骤（以 ragkb_owner / ragkb_migrator 执行，供参考）：
+--
+--   CREATE SCHEMA IF NOT EXISTS app_security AUTHORIZATION ragkb_owner;
+--
+--   CREATE OR REPLACE FUNCTION app_security.current_tenant_id()
+--   RETURNS BIGINT LANGUAGE sql STABLE PARALLEL SAFE AS $$
+--       SELECT CASE
+--           WHEN current_setting('app.tenant_id', true) ~ '^[1-9][0-9]*$'
+--               THEN current_setting('app.tenant_id', true)::BIGINT
+--           ELSE NULL
+--       END
+--   $$;
+--   REVOKE ALL ON FUNCTION app_security.current_tenant_id() FROM PUBLIC;
+--   GRANT USAGE ON SCHEMA app_security TO ragkb_app;
+--   GRANT EXECUTE ON FUNCTION app_security.current_tenant_id() TO ragkb_app;
+--
+--   -- sys_tenant 以主键作为租户范围
+--   ALTER TABLE public.sys_tenant ENABLE ROW LEVEL SECURITY;
+--   DROP POLICY IF EXISTS tenant_isolation ON public.sys_tenant;
+--   CREATE POLICY tenant_isolation ON public.sys_tenant
+--       USING (id = app_security.current_tenant_id())
+--       WITH CHECK (id = app_security.current_tenant_id());
+--
+--   -- 对所有带 tenant_id 的 public 业务表启用 fail-closed 策略（批量）
+--   DO $$
+--   DECLARE target_table RECORD;
+--   BEGIN
+--       FOR target_table IN
+--           SELECT DISTINCT c.table_name
+--           FROM information_schema.columns c
+--           JOIN information_schema.tables t
+--             ON t.table_schema = c.table_schema AND t.table_name = c.table_name
+--            AND t.table_type = 'BASE TABLE'
+--           WHERE c.table_schema = 'public'
+--             AND c.column_name = 'tenant_id'
+--             AND c.table_name <> 'sys_tenant'
+--           ORDER BY c.table_name
+--       LOOP
+--           EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', target_table.table_name);
+--           EXECUTE format('DROP POLICY IF EXISTS tenant_isolation ON public.%I', target_table.table_name);
+--           EXECUTE format(
+--               'CREATE POLICY tenant_isolation ON public.%I '
+--               'USING (tenant_id = app_security.current_tenant_id()) '
+--               'WITH CHECK (tenant_id = app_security.current_tenant_id())',
+--               target_table.table_name
+--           );
+--       END LOOP;
+--   END;
+--   $$;
+--
+-- 启用后校验（预期 fail-closed）：
+--   RESET app.tenant_id; SELECT count(*) FROM kb;  -- 期望 0 行
+-- 详细说明见 docs/04-数据库设计.md §6。
+-- =====================================================================

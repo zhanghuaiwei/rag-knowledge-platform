@@ -1,0 +1,91 @@
+# =====================================================================
+# rag-knowledge-platform · 中间件编排（2G 云服务器最小集）
+#
+# 范围（经确认）：仅 PostgreSQL + Redis + MinIO。
+#   * v0.2 模型走云端 API（DASHSCOPE_API_KEY / DEEPSEEK_API_KEY），不跑 Ollama/Milvus
+#     —— Milvus 需 >4GB 内存、Ollama 大模型 4GB+，2G 实例不可行。
+#   * SearchIndex（OpenSearch）尚未对接，待 S1 契约冻结后再评估。
+#   * rag-engine / server / web 当前均为骨架或依赖后期对接，暂不编排。
+#
+# 安全边界（对齐 SECURITY.md / 04-数据库设计）：
+#   * 不硬编码任何密码 —— 从 .env 注入（.env 不提交仓库，模板见 deploy/compose/.env.example）。
+#   * 镜像使用固定 tag（生产禁用 latest，见 SECURITY.md）。
+#   * MinIO / PostgreSQL 仅暴露内网端口或本机；云服务器公网访问走安全组/反向代理。
+#   * 资源限制对齐 2G 实例：三个服务合计约 1.1G，留有系统与后续 app 余量。
+#
+# 使用：
+#   cd deploy/compose
+#   cp .env.example .env          # 填入实际密码
+#   docker compose up -d
+#   # 初始化数据库（见 docs/09-部署运维指南.md 与 docs/04-数据库设计.md §9）：
+#   docker compose exec -T postgres psql -U postgres -d postgres \
+#     -v ragkb_app_password='<app密码>' \
+#     -v ragkb_migrator_password='<migrator密码>' \
+#     -f - < ../ddl/init.sql
+# =====================================================================
+
+name: ragkb
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ragkb-postgres
+    restart: unless-stopped
+    mem_limit: 512m
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required in .env}
+      POSTGRES_DB: postgres
+      TZ: UTC
+    ports:
+      # 仅本机访问；云服务器公网由安全组控制
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: ragkb-redis
+    restart: unless-stopped
+    mem_limit: 256m
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "192mb", "--maxmemory-policy", "allkeys-lru"]
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio:RELEASE.2024-12-18T13-15-44Z
+    container_name: ragkb-minio
+    restart: unless-stopped
+    mem_limit: 384m
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER required in .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD required in .env}
+    ports:
+      # 仅本机访问；云服务器公网由安全组控制
+      - "127.0.0.1:9000:9000"   # S3 API
+      - "127.0.0.1:9001:9001"   # Console
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:
+  redisdata:
+  miniodata:
