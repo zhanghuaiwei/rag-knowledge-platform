@@ -18,6 +18,7 @@ import type {
 } from "@/api-client/types";
 import { buildApiUrl, request, requestVoid } from "@/api-client/http/client";
 import { readSse } from "@/api-client/http/sse";
+import { getAccessToken } from "@/lib/auth";
 
 /** 反馈 kind（均为踩时原因）→ 后端 reaction。 */
 const KIND_TO_REACTION: Record<ChatFeedbackInput["kind"], "up" | "down"> = {
@@ -85,12 +86,16 @@ async function askStream(input: ChatMessageInput): Promise<ChatStreamResult> {
   let tokenOut = 0;
   let cost = 0;
 
+  const token = getAccessToken();
   await readSse(
     buildApiUrl(`/chats/${input.sessionId}/messages`),
     {
       method: "POST",
       credentials: "include",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
       body: JSON.stringify({ question: input.content, memoryTurns: 10, stream: true }),
     },
     (event) => {

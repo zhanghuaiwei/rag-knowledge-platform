@@ -2,7 +2,9 @@
  * 真实 HTTP transport 的 axios 封装。
  *
  * - baseURL：`NEXT_PUBLIC_API_BASE_URL`（默认 http://localhost:8080），追加 `/api/v1` 前缀。
- * - `withCredentials: true`：跨域直连后端时携带 BFF 会话 cookie（ragkb_session）。
+ * - 请求拦截器注入 `Authorization: Bearer <accessToken>`（token 存于内存，见 lib/auth）。
+ * - 响应拦截器：401 且非认证端点 → 单飞刷新（POST /auth/refresh，靠 HttpOnly cookie）→ 重试一次；
+ *   刷新失败则清会话并跳 /login。`withCredentials: true` 使 refresh 请求携带 cookie。
  * - 统一信封解壳：后端返回 `{ code, message, data }`，code="0" 为成功，非零抛 {@link ApiError}。
  *
  * 页面与组件只依赖 api-client 接口，本模块细节不向外暴露。
@@ -10,6 +12,7 @@
 import axios, { type AxiosError, type AxiosRequestConfig } from "axios";
 
 import { ApiError } from "@/api-client/http/errors";
+import { clearSession, getAccessToken, setAuth } from "@/lib/auth";
 
 const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8080").replace(/\/+$/, "");
 const API_PREFIX = "/api/v1";
@@ -69,9 +72,67 @@ function toApiError(error: unknown): ApiError {
   return new ApiError(message, { status, code: "E-NET" });
 }
 
+/** 认证端点自身（登录/刷新）401 不触发刷新，防止死循环。 */
+function isAuthEndpoint(url?: string): boolean {
+  return !!url && (url.includes("/auth/login") || url.includes("/auth/refresh"));
+}
+
+// ---------- 刷新单飞：并发 401 只发一次 /auth/refresh ----------
+
+let refreshPromise: Promise<boolean> | null = null;
+
+async function performRefresh(): Promise<boolean> {
+  try {
+    const resp = await http.post<ApiEnvelope<{ accessToken: string; expiresIn: number }>>(
+      "/auth/refresh",
+      null,
+      { withCredentials: true },
+    );
+    const data = unwrapEnvelope(resp.data);
+    setAuth(data.accessToken, data.expiresIn);
+    return true;
+  } catch {
+    clearSession();
+    return false;
+  }
+}
+
+/** 单飞刷新：成功后写入新 access token；失败清会话。认证端点调用方直接依赖返回值。 */
+export function tryRefreshTokens(): Promise<boolean> {
+  refreshPromise ??= performRefresh().finally(() => {
+    refreshPromise = null;
+  });
+  return refreshPromise;
+}
+
+http.interceptors.request.use((config) => {
+  const token = getAccessToken();
+  if (token && !isAuthEndpoint(config.url)) {
+    config.headers.set("Authorization", `Bearer ${token}`);
+  }
+  return config;
+});
+
 http.interceptors.response.use(
   (response) => response,
-  (error) => Promise.reject(toApiError(error)),
+  async (error) => {
+    const original = error.config as (AxiosRequestConfig & { _retried?: boolean }) | undefined;
+    const apiError = toApiError(error);
+    if (apiError.isUnauthorized && original && !isAuthEndpoint(original.url) && !original._retried) {
+      original._retried = true;
+      const ok = await tryRefreshTokens();
+      if (ok) {
+        // 重试经请求拦截器自动注入新 Bearer（刷新后 getAccessToken() 已更新）
+        return http.request(original);
+      }
+      // 刷新失败：清会话并回登录页（保留当前路径，登录后回跳）
+      if (typeof window !== "undefined") {
+        const from = window.location.pathname + window.location.search;
+        window.location.assign(`/login?from=${encodeURIComponent(from)}`);
+      }
+    }
+    return Promise.reject(apiError);
+  },
 );
 
 function unwrapEnvelope<T>(body: ApiEnvelope<T> | T | undefined): T {
