@@ -11,6 +11,8 @@
 - [Web 端产品化设计](design/web-product-design.md)：产品定位、角色、信息架构、页面与交互设计、分期和待确认问题（待评审，不冻结契约）。
 - [认证与授权技术方案](design/authentication-authorization.md)：当前双认证模式、目标授权模型、关键流程、技术清单和实施优先级。
 - [Web 动态菜单设计](design/dynamic-menu.md)：动态菜单必要性、推荐混合方案、权限上下文、租户切换和验收标准。
+- [rag-engine 最小实现与调用流程](design/rag-engine-minimal-implementation.md)：8 个内部端点的当前行为、代码边界、Java 调用断点与生产目标链路。
+- [系统功能点、实现状态与业务流程](design/system-function-analysis-and-business-flow.md)：区分“功能点已存在”和“实现待完成”，梳理功能全景、P0/P1/P2 实施项与系统总体业务流程图。
 - [后端任务](tasks/backend/README.md)：契约、安全、连接器、治理和可靠性任务。
 - [前端任务](tasks/frontend/README.md)：统一认证、连接器、治理和可解释问答体验。
 - [测试与验收](test/README.md)：安全、契约、数据隔离、同步、RAG 质量和灾备门禁。
@@ -22,4 +24,4 @@
 - 当前 HTTP/SSE 契约仍以 [`../../api/server.openapi.yaml`](../../api/server.openapi.yaml) 和 [`../../api/rag-engine.openapi.yaml`](../../api/rag-engine.openapi.yaml) 为准。
 - 领域模型、表结构与迁移策略以 [`../../04-数据库设计.md`](../../04-数据库设计.md) 和仓库根目录 `deploy/ddl/init.sql`（v0.2 单文件初始化）为准。
 - 本模块中的新增 HTTP 接口、实体和字段仍只表示待确认的契约影响；完成 OpenAPI 评审前不得据此实现调用方。
-- **实现现状（2026-08）**：`web/` 产品化页面 + mock/http 双 transport 已实现（antd/G6/ECharts，`NEXT_PUBLIC_USE_MOCK` 切换）；`service/` 已按 [`modules/<feature>/<layer>` 模块化单体规范](design/backend-package-structure.md)组织 Controller/DTO/Service/Port，Spring Security form/OIDC + MyBatis-Plus 骨架已接入，业务用例仍通过 `TodoSupport.notImplemented` 返回 501 `E-9998`，待契约冻结后实现；`rag-engine/` 为探针骨架。本模块不把 mock、计划或 TODO 占位描述为业务验收通过。
+- **实现现状（2026-08）**：`web/` 产品化页面 + mock/http 双 transport 已实现（antd/G6/ECharts，`NEXT_PUBLIC_USE_MOCK` 切换）；`service/` 已按 [`modules/<feature>/<layer>` 模块化单体规范](design/backend-package-structure.md)组织 Controller/DTO/Service/Port，Spring Security form/OIDC + MyBatis-Plus 骨架已接入，业务用例仍通过 `TodoSupport.notImplemented` 返回 501 `E-9998`；`rag-engine/` 已实现 v0.1 的 8 个最小内部端点和契约测试，但真实 provider、服务身份/授权上下文以及 Java HTTP client 尚未接入，因此仍不构成真实 RAG 或端到端验收。本模块不把 mock、计划或 TODO 占位描述为业务验收通过。
