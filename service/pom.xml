@@ -44,6 +44,25 @@
       <artifactId>spring-boot-starter-oauth2-client</artifactId>
     </dependency>
 
+    <!-- 数据访问：MyBatis-Plus（Spring Boot 3 starter）+ PostgreSQL 驱动。
+         由 ragkb.db.enabled 开关控制，未启用时不初始化数据源，保持脚手架无数据库可启动。
+         mybatis-plus-jsqlparser：3.5.9+ 分页插件拆分为独立模块（PaginationInnerInterceptor）。 -->
+    <dependency>
+      <groupId>com.baomidou</groupId>
+      <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
+      <version>3.5.17</version>
+    </dependency>
+    <dependency>
+      <groupId>com.baomidou</groupId>
+      <artifactId>mybatis-plus-jsqlparser</artifactId>
+      <version>3.5.17</version>
+    </dependency>
+    <dependency>
+      <groupId>org.postgresql</groupId>
+      <artifactId>postgresql</artifactId>
+      <scope>runtime</scope>
+    </dependency>
+
     <!-- 测试 -->
     <dependency>
       <groupId>org.springframework.boot</groupId>
