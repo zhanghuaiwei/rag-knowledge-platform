@@ -47,5 +47,4 @@
 - [ ] 构建、测试、OpenAPI lint、migration dry-run、依赖/镜像/SBOM/secret scan 均有执行证据。
 - [ ] 数据、配置、权限、部署、兼容和回滚影响已记录，不把 mock/计划写成验收通过。
 
-> **实现现状备注（2026-08）**：上述勾选反映"接口入口骨架 + 基础设施开关"阶段已完成项；所有业务用例在 `service/application/impl/*.java` 中仍为 `NotYetImplemented.stub`（HTTP 501 `E-9998`），属人工实现点，见 `service/README.md`。
-
+> **实现现状备注（2026-08）**：上述勾选反映"接口入口骨架 + 基础设施开关"阶段已完成项；业务用例已按功能包组织，尚未实现的方法统一调用 `TodoSupport.notImplemented`（HTTP 501 `E-9998`），见 `service/README.md`。

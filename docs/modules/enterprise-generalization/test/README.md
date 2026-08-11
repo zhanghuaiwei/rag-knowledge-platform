@@ -3,7 +3,7 @@
 > **文档状态**：计划 · **版本**：v0.2-draft · **负责人**：待指定 · **最近更新**：2026-08-10
 > **需求**：[`../requirements/README.md`](../requirements/README.md) · **设计**：[`../design/README.md`](../design/README.md)
 
-**测试命令现状（2026-08）**：仓库已具备可执行测试命令——`service`：`mvn -B test`（接口骨架编译/单测）；`web`：`pnpm test`（Vitest，含 `app/page`、`api-client/http/sse`、`api-client/mock`、`lib/format` 等用例）+ `pnpm lint / typecheck`；`rag-engine`：`uv run pytest -q`（`/healthz` 冒烟）。但业务用例仍为 `NotYetImplemented` stub，**下表业务验收矩阵仍全部为 `not-run`，不得作为通过证据**；待 service 业务用例实现后逐项执行。
+**测试命令现状（2026-08）**：仓库已具备可执行测试命令——`service`：`mvn -B test`（Spring 上下文冒烟 + `PackageStructureTest` 包边界约束）；`web`：`pnpm test`（Vitest，含 `app/page`、`api-client/http/sse`、`api-client/mock`、`lib/format` 等用例）+ `pnpm lint / typecheck`；`rag-engine`：`uv run pytest -q`（`/healthz` 冒烟）。但业务用例仍为 `TodoSupport.notImplemented` 占位，**下表业务验收矩阵仍全部为 `not-run`，不得作为通过证据**；待 service 业务用例实现后逐项执行。
 
 ## 1. Gate 0 验收矩阵
 
@@ -67,4 +67,3 @@
 - 保存 build、unit、integration、E2E、OpenAPI lint、migration dry-run、安全扫描、RAG eval、压测和恢复演练输出。
 - 用 `passed / failed / not-run / blocked` 分列结果；外部依赖或环境未提供时说明风险，不以 mock 替代验收。
 - 安全测试证据脱敏；禁止在报告中保留 token、API Key、原文敏感片段、私网地址和生产账号。
-

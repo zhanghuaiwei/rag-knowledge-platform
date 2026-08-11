@@ -9,7 +9,8 @@ info:
 servers:
   - url: https://api.ragkb.example.com
 security:
-  - oidcSession: []
+  - oidcSession: []      # OIDC 生产：BFF 设置的 HttpOnly 会话 cookie（现状不动）
+  - bearerJwt: []        # form 开发：JWT access token（Authorization: Bearer <token>）
 tags:
   - name: auth
     description: OIDC/BFF 登录、会话、租户切换
@@ -39,6 +40,15 @@ components:
       in: cookie
       name: ragkb_session
       description: BFF 设置的 Secure/HttpOnly/SameSite 会话 cookie；浏览器不保存长期 token（02-概要 §4.1）。
+    bearerJwt:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >-
+        form 模式的 JWT access token；前端仅内存持有（不落 localStorage），随请求头
+        `Authorization: Bearer <token>` 发送。刷新凭证走 HttpOnly cookie `ragkb_refresh`
+        （SameSite=Lax, Path=/api/v1/auth，生产加 Secure），不进入请求头；刷新见
+        `POST /api/v1/auth/refresh`。
     apiKeyAuth:
       type: http
       scheme: bearer
@@ -158,6 +168,17 @@ components:
           type: array
           items: { $ref: "#/components/schemas/TenantContext" }
         scopes: { type: array, items: { type: string } }
+    TokenResponse:
+      type: object
+      description: |
+        登录/刷新响应：access token 进响应体（前端仅内存持有）；refresh token 只写进
+        HttpOnly cookie `ragkb_refresh`，不回传给前端。
+      required: [accessToken, tokenType, expiresIn, session]
+      properties:
+        accessToken: { type: string, description: "JWT access token；前端仅内存持有，不落 localStorage" }
+        tokenType: { type: string, enum: [Bearer], default: Bearer }
+        expiresIn: { type: integer, format: int64, description: "access token 有效秒数" }
+        session: { $ref: "#/components/schemas/AuthSession" }
     ApiKey:
       type: object
       properties:
@@ -701,7 +722,9 @@ paths:
   /api/v1/auth/session:
     get:
       tags: [auth]
-      summary: 当前会话与可切换租户列表
+      summary: 当前会话与可切换租户列表（form 模式走 Bearer JWT；OIDC 生产走会话 cookie）
+      security:
+        - bearerJwt: []
       responses:
         "200":
           description: 会话信息
@@ -718,16 +741,19 @@ paths:
   /api/v1/auth/logout:
     post:
       tags: [auth]
-      summary: 登出，作废会话与刷新凭证
+      summary: 登出（幂等）：黑名单 access token 的 jti、吊销 refresh 家族、清除 refresh cookie
+      security: []
       responses:
         "204":
-          description: 成功登出
+          description: 成功登出（已携带 access 或 refresh 凭证即吊销对应会话）
         "401":
           $ref: "#/components/responses/Unauthenticated"
   /api/v1/auth/tenant/switch:
     post:
       tags: [auth]
       summary: 切换当前激活租户（仅限当前用户已加入的租户）
+      security:
+        - bearerJwt: []
       requestBody:
         required: true
         content:
@@ -2364,7 +2390,7 @@ paths:
   /api/v1/auth/login:
     post:
       tags: [auth]
-      summary: 账号密码登录（form 模式，开发/演示；生产走 OIDC authorize）
+      summary: 账号密码登录（form 模式，开发/演示；生产走 OIDC authorize）：签发 access token + 写 refresh cookie
       security: []
       requestBody:
         required: true
@@ -2378,7 +2404,11 @@ paths:
                 password: { type: string }
       responses:
         "200":
-          description: 登录成功，建立 HttpOnly 会话 cookie，返回会话概览
+          description: 登录成功；响应体含 access token（前端仅内存持有），refresh token 写进 HttpOnly cookie `ragkb_refresh`
+          headers:
+            Set-Cookie:
+              description: '`ragkb_refresh=<jwt>; HttpOnly; Path=/api/v1/auth; SameSite=Lax`（生产 https 追加 Secure）'
+              schema: { type: string }
           content:
             application/json:
               schema:
@@ -2386,7 +2416,35 @@ paths:
                   - { $ref: "#/components/schemas/ApiResponse" }
                   - type: object
                     properties:
-                      data: { $ref: "#/components/schemas/AuthSession" }
+                      data: { $ref: "#/components/schemas/TokenResponse" }
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+
+  /api/v1/auth/refresh:
+    post:
+      tags: [auth]
+      summary: 轮换刷新凭证：读取 HttpOnly cookie `ragkb_refresh`，签发新 access token + 新 refresh cookie
+      description: |
+        - 无 refresh cookie / 过期 → 401。
+        - 正常刷新：旧 refresh token 被轮换作废，响应 Set-Cookie 写入新 refresh token。
+        - 复用检测：已轮换掉的旧 refresh token 再次出现 → 视为被盗 → 吊销整族会话（后续所有
+          该家族的 refresh 均 401）。
+      security: []
+      responses:
+        "200":
+          description: 刷新成功；响应体含新 access token，Set-Cookie 写入轮换后的 refresh token
+          headers:
+            Set-Cookie:
+              description: 轮换后的 `ragkb_refresh=<jwt>`（HttpOnly/Path=/api/v1/auth/SameSite=Lax）
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/TokenResponse" }
         "401":
           $ref: "#/components/responses/Unauthenticated"
 
