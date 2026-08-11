@@ -1,27 +1,34 @@
 /**
- * 真实 HTTP transport（占位）。
+ * 真实 HTTP transport：按域模块组合成统一 ApiClient 实现。
  *
- * 当前 OpenAPI v0.2 仍处于评审冻结阶段（docs/api/server.openapi.yaml），
- * 端点与字段未最终确定，因此不提前实现 fetch 逻辑，避免与权威契约失配。
- *
- * 冻结后在本模块基于 API base URL 实现各方法，并替换 client.ts 中的
- * `httpClient`；页面代码无需改动（只依赖 ApiClient 接口）。
+ * 与 mock transport 形状完全一致（同属 ApiClient 接口）；由 client.ts 依据
+ * `NEXT_PUBLIC_USE_MOCK` 切换。页面只依赖 api-client，不感知数据来源。
  */
-import type { ApiClient } from "@/api-client/client";
+import type { ApiClient } from "@/api-client/contracts";
+import { adminApi } from "@/api-client/http/admin";
+import { analyticsApi } from "@/api-client/http/analytics";
+import { authApi } from "@/api-client/http/auth";
+import { chatApi } from "@/api-client/http/chat";
+import { documentApi } from "@/api-client/http/document";
+import { governanceApi } from "@/api-client/http/governance";
+import { kbApi } from "@/api-client/http/kb";
+import { miscApi } from "@/api-client/http/misc";
+import { reviewApi } from "@/api-client/http/review";
+import { searchApi } from "@/api-client/http/search";
 
-function notImplemented(name: string): never {
-  throw new Error(
-    `[api-client] http transport 的 ${name} 尚未实现：OpenAPI v0.2 冻结后接入。` +
-      "当前请使用内置 mock（默认开启，无需后端）。",
-  );
-}
+export const httpClient: ApiClient = {
+  ...authApi,
+  ...kbApi,
+  ...documentApi,
+  ...reviewApi,
+  ...adminApi,
+  ...governanceApi,
+  ...chatApi,
+  ...searchApi,
+  ...analyticsApi,
+  ...miscApi,
+};
 
-/**
- * 通过 Proxy 生成同接口占位实现：任何方法被调用都会给出明确指引，
- * 避免逐一手写占位方法，也保证接口形状与 mock 完全一致。
- */
-export const httpClient: ApiClient = new Proxy({} as ApiClient, {
-  get(_target, prop) {
-    return () => notImplemented(String(prop));
-  },
-});
+export { ApiError } from "@/api-client/http/errors";
+export { buildApiUrl, request, requestBlob, requestVoid, waitForTask } from "@/api-client/http/client";
+export { readSse } from "@/api-client/http/sse";

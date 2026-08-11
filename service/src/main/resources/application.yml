@@ -18,3 +18,14 @@ management:
 
 # 脚手架阶段无数据库/对象存储连接；业务数据源在对应模块实现时按
 # 04-数据库设计 接入，凭证一律走环境变量，禁止硬编码。
+
+# rag-engine（Python）对接配置（06-架构方案）；实际对接由人工在
+# adapters/ragengine/RagEngineHttpClient 中实现。
+rag-engine:
+  base-url: ${RAG_ENGINE_BASE_URL:http://rag-engine.ragkb.svc:8000}
+  timeout-ms: ${RAG_ENGINE_TIMEOUT_MS:10000}
+
+# CORS：前端直连来源（逗号分隔），携带会话 cookie 需要 allowCredentials。
+ragkb:
+  cors:
+    allowed-origins: ${RAGKB_CORS_ALLOWED_ORIGINS:http://localhost:3000}

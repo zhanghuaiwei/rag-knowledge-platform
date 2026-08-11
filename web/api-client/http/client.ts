@@ -1,0 +1,136 @@
+/**
+ * 真实 HTTP transport 的 axios 封装。
+ *
+ * - baseURL：`NEXT_PUBLIC_API_BASE_URL`（默认 http://localhost:8080），追加 `/api/v1` 前缀。
+ * - `withCredentials: true`：跨域直连后端时携带 BFF 会话 cookie（ragkb_session）。
+ * - 统一信封解壳：后端返回 `{ code, message, data }`，code="0" 为成功，非零抛 {@link ApiError}。
+ *
+ * 页面与组件只依赖 api-client 接口，本模块细节不向外暴露。
+ */
+import axios, { type AxiosError, type AxiosRequestConfig } from "axios";
+
+import { ApiError } from "@/api-client/http/errors";
+
+const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8080").replace(/\/+$/, "");
+const API_PREFIX = "/api/v1";
+
+/** 后端统一响应信封。 */
+interface ApiEnvelope<T> {
+  code: string;
+  message: string;
+  data: T;
+  requestId?: string;
+}
+
+/** 拼出后端完整请求地址（SSE 等 fetch 场景使用）。 */
+export function buildApiUrl(path: string): string {
+  return `${API_BASE_URL}${API_PREFIX}${path}`;
+}
+
+/** 数组查询参数逗号拼接（对齐 OpenAPI explode:false / Spring List 解析）。 */
+function serializeParams(params: Record<string, unknown>): string {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === null || value === "") continue;
+    if (Array.isArray(value)) {
+      if (value.length > 0) search.set(key, value.join(","));
+    } else {
+      search.set(key, String(value));
+    }
+  }
+  return search.toString();
+}
+
+export const http = axios.create({
+  baseURL: `${API_BASE_URL}${API_PREFIX}`,
+  timeout: 15_000,
+  withCredentials: true,
+  headers: { "Content-Type": "application/json" },
+  paramsSerializer: { serialize: serializeParams },
+});
+
+/** 将任意错误归一化为 ApiError（供页面 catch 统一展示）。 */
+function toApiError(error: unknown): ApiError {
+  if (error instanceof ApiError) return error;
+  const axiosError = error as AxiosError<ApiEnvelope<unknown>>;
+  const status = axiosError?.response?.status;
+  const body = axiosError?.response?.data;
+  if (body && typeof body === "object" && "code" in body && "message" in body) {
+    return new ApiError(body.message, {
+      status,
+      code: body.code,
+      requestId: body.requestId,
+    });
+  }
+  if (axiosError?.code === "ECONNABORTED") {
+    return new ApiError("请求超时，请稍后重试", { status, code: "E-TIMEOUT" });
+  }
+  const message = axiosError?.message ?? "网络连接失败";
+  return new ApiError(message, { status, code: "E-NET" });
+}
+
+http.interceptors.response.use(
+  (response) => response,
+  (error) => Promise.reject(toApiError(error)),
+);
+
+function unwrapEnvelope<T>(body: ApiEnvelope<T> | T | undefined): T {
+  if (body == null) return undefined as T;
+  if (typeof body === "object" && "code" in (body as object) && "data" in (body as object)) {
+    const envelope = body as ApiEnvelope<T>;
+    if (envelope.code !== "0") {
+      throw new ApiError(envelope.message, { code: envelope.code, requestId: envelope.requestId });
+    }
+    return envelope.data;
+  }
+  // 非信封响应（如 204 空体）直接透传
+  return body as T;
+}
+
+/** JSON 接口：解壳后直接返回业务数据。 */
+export async function request<T>(config: AxiosRequestConfig): Promise<T> {
+  const response = await http.request<ApiEnvelope<T> | T>(config);
+  return unwrapEnvelope<T>(response.data);
+}
+
+/** 无返回体接口（204）：成功即 resolve。 */
+export async function requestVoid(config: AxiosRequestConfig): Promise<void> {
+  await http.request(config);
+}
+
+/** 二进制接口（下载 / 导出）。 */
+export async function requestBlob(config: AxiosRequestConfig): Promise<Blob> {
+  const response = await http.request<Blob>({ ...config, responseType: "blob" });
+  return response.data;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isTaskTerminal(status: string | undefined): boolean {
+  return status === "SUCCEEDED" || status === "FAILED" || status === "CANCELLED";
+}
+
+/**
+ * 轮询异步任务直到终态（克隆/上传/解析等后端 202 + Task 的接口）。
+ * 超时抛 {@link ApiError}，页面提示去任务中心查看。
+ */
+export async function waitForTask(taskId: string | number, timeoutMs = 8000): Promise<import("@/api-client/types").Task> {
+  const id = String(taskId);
+  const deadline = Date.now() + timeoutMs;
+  let lastStatus: string | undefined;
+  while (Date.now() < deadline) {
+    // eslint-disable-next-line no-await-in-loop
+    const task = await request<import("@/api-client/types").Task>({ method: "GET", url: `/tasks/${id}` });
+    lastStatus = task.status;
+    if (task.status === "SUCCEEDED") return task;
+    if (task.status === "FAILED" || task.status === "CANCELLED") {
+      throw new ApiError(task.message ?? `任务执行失败（${task.status}）`, { code: "E-TASK" });
+    }
+    await sleep(500);
+  }
+  throw new ApiError(`任务处理超时（${lastStatus ?? "未知"}），请稍后在任务中心查看进度`, {
+    code: "E-TASK-TIMEOUT",
+  });
+}

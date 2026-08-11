@@ -5,6 +5,7 @@ import com.ragkb.service.common.ApiResponse;
 import com.ragkb.service.common.ErrorCode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -36,6 +37,17 @@ public class GlobalExceptionHandler {
                 .orElse(ErrorCode.BAD_REQUEST.getMessage());
         return ResponseEntity.badRequest()
                 .body(ApiResponse.error(ErrorCode.BAD_REQUEST.getCode(), message));
+    }
+
+    /**
+     * 脚手架阶段：接口入口已就绪，业务实现点待人工实现。
+     * 桩实现抛出 {@link UnsupportedOperationException}，统一映射为 501 Not Implemented。
+     */
+    @ExceptionHandler(UnsupportedOperationException.class)
+    public ResponseEntity<ApiResponse<Void>> handleNotImplemented(UnsupportedOperationException ex) {
+        log.warn("not implemented entrypoint: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.NOT_IMPLEMENTED)
+                .body(ApiResponse.error("E-9998", ex.getMessage()));
     }
 
     @ExceptionHandler(Exception.class)
