@@ -51,7 +51,7 @@
 | 关系模型、约束和迁移 | [`04-数据库设计.md`](04-数据库设计.md) | v0.2 评审中 |
 | 技术决策与替换边界 | [`05-技术选型.md`](05-技术选型.md) | v0.2 评审中 |
 | 部署、安全、可靠性架构 | [`06-架构方案.md`](06-架构方案.md) | v0.2 评审中 |
-| HTTP/SSE 契约（server） | `api/server.openapi.yaml` | **v0.2 草稿，评审中，未冻结**（66 路径 / 90 操作）；rag-engine 内部契约待补 |
+| HTTP/SSE 契约（server） | `api/server.openapi.yaml` | **v0.2 草稿，评审中，未冻结**（89 路径 / 113 操作，覆盖现有 controller 全部路径）；rag-engine 内部契约待补 |
 | 测试与验收 | [`modules/enterprise-generalization/test/README.md`](modules/enterprise-generalization/test/README.md) | 计划，全部 not-run |
 | 新装 Schema | `deploy/ddl/01-schema.sql` | v0.2 文件基线，未执行 |
 | v0.1 扩展迁移 | `deploy/ddl/03-v0.2-enterprise-generalization.sql` | 非破坏性预览，未执行 |
@@ -103,8 +103,8 @@
 
 ## 6. 当前限制与联动项
 
-1. `service/`、`web/`、`rag-engine/` 尚无应用代码；git 与 `.ai/current-role.md` 已初始化，`.ai/project.json` 的验证命令在骨架完成后填入。
-2. `api/server.openapi.yaml` 已升级为 v0.2 草稿（OIDC/BFF、授权上下文、连接器、治理、索引构建、删除证明、scoped API Key 均已覆盖，评审中未冻结）；`api/rag-engine.openapi.yaml` 仍是 v0.1，server→rag-engine 内部契约（RetrievalAccessContext、服务认证、ingest/query/delete/task）待补。
+1. **实现现状（2026-08）**：`web/` 产品化页面 + mock/http 双 transport 已实现（antd/G6/ECharts，`NEXT_PUBLIC_USE_MOCK` 切换）；`service/` 为完整接口入口骨架（11 个 Controller、DTO、错误码已落地；Spring Security form/OIDC 认证开关 + MyBatis-Plus `ragkb.db.enabled` 骨架已接入），业务用例仍为 `NotYetImplemented` stub（HTTP 501 `E-9998`），待契约冻结后人工实现；`rag-engine/` 为 `/healthz` 探针骨架（`domain`/`ports` 已就绪）。详见 `web/README.md`、`service/README.md`、`rag-engine/README.md`。
+2. `api/server.openapi.yaml` 已升级为 v0.2 草稿（OIDC/BFF、授权上下文、连接器、治理、索引构建、删除证明、scoped API Key 均已覆盖，评审中未冻结；当前 89 路径 / 113 操作，已覆盖现有 controller 全部路径）；`api/rag-engine.openapi.yaml` 仍是 v0.1，server→rag-engine 内部契约（RetrievalAccessContext、服务认证、ingest/query/delete/task）待补。
 3. `01-需求分析.md`、`07-API契约.md`、`08-测试与质量评估.md`、`09-部署运维指南.md`、`10-里程碑与开发计划.md` 均为 v0.1 内容并已在文内标注"已废弃/待同步"；其中与 v0.2 冲突的技术选型表述以 v0.2 ADR 为准，`10` 的计划待按 v0.2 架构重排。
 4. 所有 DDL 都是文件变更，未连接或修改任何真实数据库。
 
