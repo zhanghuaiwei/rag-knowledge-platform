@@ -1,10 +1,12 @@
 package com.ragkb.service.modules.governance.persistence.entity;
 
+import com.ragkb.service.common.persistence.BaseAuditEntity;
+
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import java.time.Instant;
-import java.io.Serializable;
+
 
 /**
  * {@code legal_hold} 表实体 —— MyBatis-Plus 骨架（对齐 {@code deploy/ddl/init.sql}）。
@@ -19,7 +21,7 @@ import java.io.Serializable;
  * 由数据库默认值（now() 等）填充。本类不含业务逻辑。
  */
 @TableName("legal_hold")
-public class LegalHold implements Serializable {
+public class LegalHold extends BaseAuditEntity {
 
     @TableId(type = IdType.AUTO)
     private Long id;
@@ -32,11 +34,7 @@ public class LegalHold implements Serializable {
 
     private String status;
 
-    private Long createdBy;
-
     private Long releasedBy;
-
-    private Instant createdAt;
 
     private Instant releasedAt;
 
@@ -80,28 +78,12 @@ public class LegalHold implements Serializable {
         this.status = status;
     }
 
-    public Long getCreatedBy() {
-        return createdBy;
-    }
-
-    public void setCreatedBy(Long createdBy) {
-        this.createdBy = createdBy;
-    }
-
     public Long getReleasedBy() {
         return releasedBy;
     }
 
     public void setReleasedBy(Long releasedBy) {
         this.releasedBy = releasedBy;
-    }
-
-    public Instant getCreatedAt() {
-        return createdAt;
-    }
-
-    public void setCreatedAt(Instant createdAt) {
-        this.createdAt = createdAt;
     }
 
     public Instant getReleasedAt() {

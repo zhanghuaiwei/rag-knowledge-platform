@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { Tabs } from "antd";
 
 import { RouteGuard } from "@/components/route-guard";
+import { GOVERNANCE_PERMISSIONS } from "@/lib/permissions";
 
 const TABS = [
   { key: "/governance/review", label: "审核队列" },
@@ -40,7 +41,7 @@ function GovernanceNav({ children }: { children: React.ReactNode }) {
 
 export default function GovernanceLayout({ children }: { children: React.ReactNode }) {
   return (
-    <RouteGuard mode="governance">
+    <RouteGuard requiredAny={GOVERNANCE_PERMISSIONS}>
       <GovernanceNav>{children}</GovernanceNav>
     </RouteGuard>
   );

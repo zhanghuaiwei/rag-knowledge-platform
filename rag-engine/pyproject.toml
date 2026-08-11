@@ -10,6 +10,9 @@ dependencies = [
     "pydantic-settings>=2.0",
 ]
 
+[project.scripts]
+rag-engine = "rag_engine.__main__:main"
+
 [dependency-groups]
 dev = [
     "pytest>=8.0",

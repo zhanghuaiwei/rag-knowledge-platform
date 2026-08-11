@@ -40,8 +40,11 @@ public interface AuthService {
     /** 登出：黑名单 access token 的 jti + 吊销 refresh 家族（幂等，容忍凭证缺失）。 */
     void logout(String accessToken, String rawRefreshToken);
 
-    /** 切换激活租户。 */
-    AuthSessionVo switchTenant(long tenantId);
+    /**
+     * 切换激活租户（JWT 模式）：服务端校验目标租户成员关系后重签 access + refresh，
+     * 返回新的 TokenResponse（Controller 负责写 refresh cookie）。
+     */
+    AuthResult switchTenant(long tenantId);
 
     List<ApiKeyVo> listApiKeys();
 

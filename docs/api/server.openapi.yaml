@@ -151,14 +151,20 @@ components:
         originalTaskId: { type: string, nullable: true }
     TenantContext:
       type: object
-      description: 当前激活租户（由服务端从已验证身份推导，不信任客户端自报）
+      description: 租户上下文（由服务端从已验证身份推导，不信任客户端自报）；tenantRoles 为该用户在该租户的角色集合
       properties:
         tenantId: { type: integer, format: int64 }
         tenantCode: { type: string }
-        tenantRole: { type: string, enum: [TENANT_ADMIN, SECURITY_ADMIN, KNOWLEDGE_ADMIN, AUDITOR, MEMBER] }
+        tenantRoles:
+          type: array
+          items: { type: string, enum: [TENANT_ADMIN, SECURITY_ADMIN, KNOWLEDGE_ADMIN, AUDITOR, MEMBER] }
     AuthSession:
       type: object
-      description: 当前登录用户会话概览
+      description: |
+        当前登录用户会话概览（动态菜单授权上下文）。
+        ⚠️ 以下字段为 v0.2 待评审契约（permissions/features/policyVersion/tenantRoles/credentialScopes）：
+        tenantRoles 仅解释身份；credentialScopes 是凭证能力；permissions 是菜单/按钮使用的稳定能力码；
+        features 表示租户套餐/部署能力；policyVersion 用于判断前端缓存上下文是否过期。
       properties:
         userId: { type: integer, format: int64 }
         subjectKey: { type: string, description: "issuer + subject 映射键" }
@@ -167,7 +173,23 @@ components:
         tenants:
           type: array
           items: { $ref: "#/components/schemas/TenantContext" }
-        scopes: { type: array, items: { type: string } }
+        tenantRoles:
+          type: array
+          description: 当前租户角色（解释身份，不直接散落到菜单判断）
+          items: { type: string }
+        credentialScopes:
+          type: array
+          description: 凭证能力（如 web / API Key scope），不等于租户角色与最终权限
+          items: { type: string }
+        permissions:
+          type: array
+          description: 菜单/路由/按钮使用的稳定能力码（服务端集中聚合）
+          items: { type: string }
+        features:
+          type: array
+          description: 租户套餐、部署模式或后端能力是否可用
+          items: { type: string }
+        policyVersion: { type: integer, format: int64, description: "授权策略版本" }
     TokenResponse:
       type: object
       description: |
@@ -765,7 +787,7 @@ paths:
                 tenantId: { type: integer, format: int64 }
       responses:
         "200":
-          description: 新会话上下文
+          description: 切换成功（JWT 模式服务端重签）：返回新 TokenResponse，refresh 重新写 HttpOnly cookie
           content:
             application/json:
               schema:
@@ -773,7 +795,7 @@ paths:
                   - { $ref: "#/components/schemas/ApiResponse" }
                   - type: object
                     properties:
-                      data: { $ref: "#/components/schemas/AuthSession" }
+                      data: { $ref: "#/components/schemas/TokenResponse" }
         "403":
           $ref: "#/components/responses/Forbidden"
 

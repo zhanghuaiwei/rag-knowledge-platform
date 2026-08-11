@@ -1,1 +1,5 @@
-"""HTTP/SSE 入口与 DTO 映射。仅处理协议、服务身份认证与 RetrievalAccessContext 校验。"""
+"""跨功能 HTTP/SSE 路由聚合与依赖解析。"""
+
+from rag_engine.api.router import api_router
+
+__all__ = ["api_router"]

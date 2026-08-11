@@ -10,6 +10,9 @@ import java.time.Duration;
  */
 public interface RefreshTokenStorePort {
 
+    /** 首次签发 refresh token 时初始化家族（写入初始 jti）。 */
+    void save(String familyId, String jti, Duration ttl);
+
     /**
      * 校验并轮换 refresh token：
      *

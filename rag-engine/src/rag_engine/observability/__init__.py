@@ -1,1 +1,5 @@
-"""可观测性：OpenTelemetry span、结构化日志、指标；禁止记录 token/secret/原文。"""
+"""日志、指标与追踪的技术边界。"""
+
+from rag_engine.observability.logging import configure_logging
+
+__all__ = ["configure_logging"]

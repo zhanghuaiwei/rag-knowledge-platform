@@ -1,11 +1,13 @@
 package com.ragkb.service.modules.integration.persistence.entity;
 
+import com.ragkb.service.common.persistence.BaseAuditEntity;
+
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import java.time.Instant;
 import java.util.UUID;
-import java.io.Serializable;
+
 
 /**
  * {@code outbox_event} 表实体 —— MyBatis-Plus 骨架（对齐 {@code deploy/ddl/init.sql}）。
@@ -20,7 +22,7 @@ import java.io.Serializable;
  * 由数据库默认值（now() 等）填充。本类不含业务逻辑。
  */
 @TableName("outbox_event")
-public class OutboxEvent implements Serializable {
+public class OutboxEvent extends BaseAuditEntity {
 
     @TableId(type = IdType.AUTO)
     private Long id;

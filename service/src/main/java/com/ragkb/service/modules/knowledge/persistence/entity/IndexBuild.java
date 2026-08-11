@@ -1,10 +1,12 @@
 package com.ragkb.service.modules.knowledge.persistence.entity;
 
+import com.ragkb.service.common.persistence.BaseAuditEntity;
+
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import java.time.Instant;
-import java.io.Serializable;
+
 
 /**
  * {@code index_build} 表实体 —— MyBatis-Plus 骨架（对齐 {@code deploy/ddl/init.sql}）。
@@ -19,7 +21,7 @@ import java.io.Serializable;
  * 由数据库默认值（now() 等）填充。本类不含业务逻辑。
  */
 @TableName("index_build")
-public class IndexBuild implements Serializable {
+public class IndexBuild extends BaseAuditEntity {
 
     @TableId(type = IdType.AUTO)
     private Long id;

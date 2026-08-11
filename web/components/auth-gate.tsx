@@ -1,38 +1,35 @@
 "use client";
 
+import { useEffect, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState, type ReactNode } from "react";
 
-import { api } from "@/api-client";
 import { Loading } from "@/components/async-state";
+import { useAuth } from "@/components/auth-provider";
 
-/** 路由守卫：(main) 分组内页面要求登录态；启动时经 getCurrentUser（含自动 refresh）校验。 */
+/**
+ * 登录门禁（体验层）：读取 AuthProvider 单一上下文，(main) 分组内页面要求登录态；
+ * 未登录/会话过期统一回登录页并保留当前路径。
+ */
 export function AuthGate({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
-  const [allowed, setAllowed] = useState(false);
+  const { user, loading } = useAuth();
 
   useEffect(() => {
-    let cancelled = false;
-    api
-      .getCurrentUser()
-      .then(() => {
-        if (!cancelled) setAllowed(true);
-      })
-      .catch(() => {
-        if (!cancelled) router.replace(`/login?from=${encodeURIComponent(pathname)}`);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [router, pathname]);
+    if (!loading && !user) {
+      router.replace(`/login?from=${encodeURIComponent(pathname)}`);
+    }
+  }, [loading, user, pathname, router]);
 
-  if (!allowed) {
+  if (loading) {
     return (
       <div style={{ minHeight: "60vh", display: "grid", placeItems: "center" }}>
         <Loading text="正在校验登录态…" />
       </div>
     );
+  }
+  if (!user) {
+    return null; // 已触发跳转登录页
   }
   return <>{children}</>;
 }

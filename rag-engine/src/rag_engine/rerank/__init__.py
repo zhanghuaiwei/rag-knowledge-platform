@@ -1,1 +1,7 @@
-"""精排：reranker provider 调用、top_n 截断、低置信拒答判定。"""
+"""候选精排、截断和低置信判断功能包。"""
+
+from rag_engine.rerank.models import CandidateScore
+from rag_engine.rerank.ports import RerankerProvider
+from rag_engine.rerank.service import RerankService
+
+__all__ = ["CandidateScore", "RerankerProvider", "RerankService"]

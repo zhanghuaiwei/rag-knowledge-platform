@@ -1,5 +1,6 @@
 package com.ragkb.service.config;
 
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -82,7 +83,8 @@ public class SecurityConfig {
     public SecurityFilterChain formFilterChain(
             HttpSecurity http,
             AuthenticationEntryPoint entryPoint,
-            JwtAuthenticationFilter jwtFilter) throws Exception {
+            JwtAuthenticationFilter jwtFilter,
+            ObjectProvider<ApiKeyAuthenticationFilter> apiKeyFilterProvider) throws Exception {
         http
                 .csrf(csrf -> csrf.disable()) // 脚手架说明见类注释
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
@@ -95,7 +97,10 @@ public class SecurityConfig {
                 .exceptionHandling(ex -> ex.authenticationEntryPoint(entryPoint))
                 .formLogin(form -> form.disable())
                 .logout(logout -> logout.disable()) // 登出由 AuthController 显式处理
+                // API Key 过滤（db.enabled=true 时挂载）须在 JWT 过滤之前：rk_ 前缀分流，不把 API Key 交给 JWT Parser
                 .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
+        apiKeyFilterProvider.ifAvailable(apiKeyFilter ->
+                http.addFilterBefore(apiKeyFilter, JwtAuthenticationFilter.class));
         return http.build();
     }
 

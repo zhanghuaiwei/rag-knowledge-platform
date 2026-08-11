@@ -9,7 +9,7 @@
 
 现有设计已经覆盖多知识库、文档解析、混合检索、引用问答、多租户、组织角色、文档 ACL、审核、审计、RAG 评测和容器化运维，属于方向正确的“企业级 RAG 方案草稿”。但当前还存在三类本质差距：
 
-1. `web/` 产品化页面 + mock/http 双 transport 已实现（可运行演示），`service/` 为按功能包组织的接口入口骨架（Controller/DTO/Service/Port + Spring Security form/OIDC + MyBatis-Plus 骨架，业务用例仍为 `TodoSupport.notImplemented` 占位），`rag-engine/` 为探针骨架；构建/测试命令均已配置。业务能力交付成熟度仍不能高于“接口骨架 + mock 演示”，真实数据链路待 service 业务用例人工实现。
+1. `web/` 产品化页面 + mock/http 双 transport 已实现（可运行演示），`service/` 为按功能包组织的接口入口骨架（Controller/DTO/Service/Port + Spring Security form/OIDC + MyBatis-Plus 骨架，业务用例仍为 `TodoSupport.notImplemented` 占位）；`rag-engine/` 已实现 v0.1 的 8 个最小内部端点，但未接入真实对象存储、索引、模型、服务身份和授权上下文；构建/测试命令均已配置。业务能力交付成熟度仍不能高于“接口骨架 + mock/最小协议联调”，真实数据链路待契约冻结后实现。
 2. 权限、OAuth、OpenAPI 与检索索引之间存在阻断性矛盾，按当前契约实现会产生越权或无法实现的行为。
 3. 主要摄取入口仍是手工上传/ZIP，缺少连接器、增量同步、源权限传播、元数据模型、内容安全和企业治理，因此难以适配不同组织与行业。
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { Avatar, Button, Drawer, Dropdown, Input, Layout, Menu, Tooltip } from "antd";
 import type { MenuProps } from "antd";
 import {
@@ -18,8 +18,7 @@ import {
   SunOutlined,
 } from "@ant-design/icons";
 
-import { api } from "@/api-client";
-import type { CurrentUser } from "@/api-client";
+import { useAuth } from "@/components/auth-provider";
 import { useToast } from "@/components/feedback";
 import { NotificationCenter } from "@/components/notification-center";
 import { TaskCenter } from "@/components/task-center";
@@ -29,36 +28,33 @@ import { buildNav, findSelectedKey, NAV_ICON } from "@/components/nav-config";
 import { clearSession } from "@/lib/auth";
 import { resolveMode } from "@/lib/theme";
 
-/** mock 租户列表：真实环境由租户成员关系接口返回（待契约）。 */
-const MOCK_TENANTS = [
-  { id: 1, name: "云图科技" },
-  { id: 2, name: "云图科技（华南）" },
-  { id: 3, name: "生态合作伙伴" },
-];
-
+/**
+ * 应用外壳：侧边栏 + 顶栏 + 租户切换。
+ *
+ * 用户/权限上下文来自 AuthProvider 单一快照；菜单按 permissions/features 动态过滤；
+ * 租户切换调用后端 /auth/tenant/switch（JWT 重签），成功后原子替换上下文并清理旧租户缓存，
+ * 当前路径不再可用时回工作台。
+ */
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const toast = useToast();
   const { config, update } = useTheme();
-  const [user, setUser] = useState<CurrentUser | null>(null);
-  const [tenantId, setTenantId] = useState(1);
+  const { user, switchTenant, logout } = useAuth();
+  const [switching, setSwitching] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [globalKeyword, setGlobalKeyword] = useState("");
 
-  useEffect(() => {
-    api.getCurrentUser().then(setUser).catch(() => undefined);
-  }, []);
-
-  useEffect(() => setMobileMenuOpen(false), [pathname]);
-
   const collapsed = config.sidebarCollapsed;
   const dark = resolveMode(config.mode) === "dark";
 
-  // 导航按角色过滤（体验层），管理中心/治理中心对非授权角色隐藏
-  const nav = useMemo(() => buildNav(user ?? { roles: [] }), [user]);
+  // 导航按当前租户授权上下文过滤（体验层；服务端独立授权兜底）
+  const nav = useMemo(
+    () => buildNav({ permissions: user?.permissions ?? [], features: user?.features ?? [] }),
+    [user],
+  );
   const menuItems: MenuProps["items"] = nav.map((group) => ({
     type: "group",
     label: group.section,
@@ -75,13 +71,23 @@ export function AppShell({ children }: { children: ReactNode }) {
   }));
   const selectedKey = useMemo(() => findSelectedKey(nav, pathname), [nav, pathname]);
 
-  const tenantName = MOCK_TENANTS.find((t) => t.id === tenantId)?.name ?? user?.tenantName ?? "";
+  const tenantName = user?.tenantName ?? "";
 
-  const switchTenant = (id: number) => {
-    if (id === tenantId) return;
-    setTenantId(id);
-    const tenant = MOCK_TENANTS.find((t) => t.id === id);
-    toast("info", `已切换到「${tenant?.name}」，正在刷新上下文…`);
+  const handleSwitchTenant = async (id: number) => {
+    if (id === user?.tenantId || switching) return;
+    setSwitching(true);
+    try {
+      const next = await switchTenant(id);
+      toast("info", `已切换到「${next.tenantName}」，正在刷新上下文…`);
+      // 当前路径在新租户菜单中不再允许 → 回工作台（dynamic-menu §7.5）
+      if (pathname !== "/dashboard" && !findSelectedKey(buildNav(next), pathname)) {
+        router.replace("/dashboard");
+      }
+    } catch {
+      toast("error", "切换租户失败：你不是该租户的可用成员");
+    } finally {
+      setSwitching(false);
+    }
   };
 
   const submitGlobalSearch = () => {
@@ -92,14 +98,25 @@ export function AppShell({ children }: { children: ReactNode }) {
   const navigate = ({ key }: { key: string }) => router.push(key);
 
   const tenantMenu: MenuProps["items"] = [
-    ...MOCK_TENANTS.map((t) => ({
-      key: String(t.id),
-      label: t.name,
-      icon: t.id === tenantId ? <CheckOutlined /> : undefined,
+    ...(user?.tenants ?? []).map((tenant) => ({
+      key: String(tenant.tenantId),
+      label: tenant.tenantName,
+      icon: tenant.tenantId === user?.tenantId ? <CheckOutlined /> : undefined,
     })),
     { type: "divider" },
     { key: "hint", label: "切换租户将清空当前缓存上下文", disabled: true },
   ];
+
+  const handleLogout = async () => {
+    try {
+      await logout();
+    } catch {
+      // 后端登出失败也兜底清理本地内存 token
+    } finally {
+      clearSession();
+      router.replace("/login");
+    }
+  };
 
   const userMenu: MenuProps["items"] = [
     {
@@ -119,15 +136,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       icon: <LogoutOutlined />,
       label: "退出登录",
       danger: true,
-      onClick: () => {
-        api
-          .logout()
-          .catch(() => undefined)
-          .finally(() => {
-            clearSession(); // 兜底：即便后端登出失败也清本地内存 token
-            router.replace("/login");
-          });
-      },
+      onClick: () => void handleLogout(),
     },
   ];
 
@@ -190,8 +199,8 @@ export function AppShell({ children }: { children: ReactNode }) {
           <TaskCenter />
           <NotificationCenter />
 
-          <Dropdown menu={{ items: tenantMenu, onClick: ({ key }) => switchTenant(Number(key)) }} trigger={["click"]}>
-            <Button type="text" icon={<ApartmentOutlined />} style={{ maxWidth: 180 }}>
+          <Dropdown menu={{ items: tenantMenu, onClick: ({ key }) => void handleSwitchTenant(Number(key)) }} trigger={["click"]}>
+            <Button type="text" icon={<ApartmentOutlined />} style={{ maxWidth: 180 }} loading={switching}>
               <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "inline-block", maxWidth: 120 }}>{tenantName}</span>
               <DownOutlined style={{ fontSize: 10 }} />
             </Button>
@@ -210,8 +219,8 @@ export function AppShell({ children }: { children: ReactNode }) {
         </Layout.Header>
 
         <Layout.Content className="shell-main">
-          {/* key=tenantId：切换租户即整体重挂载，清空旧租户缓存（mock 演示语义） */}
-          <div className="shell-main-inner" key={tenantId}>
+          {/* key=tenantId：切换租户即整体重挂载，清空旧租户请求缓存/SSE/轮询 */}
+          <div className="shell-main-inner" key={user?.tenantId ?? "no-tenant"}>
             {children}
           </div>
         </Layout.Content>

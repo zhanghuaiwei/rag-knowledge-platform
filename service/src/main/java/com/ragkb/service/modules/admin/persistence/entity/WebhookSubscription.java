@@ -1,11 +1,13 @@
 package com.ragkb.service.modules.admin.persistence.entity;
 
+import com.ragkb.service.common.persistence.BaseAuditEntity;
+
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.baomidou.mybatisplus.annotation.Version;
 import java.time.Instant;
-import java.io.Serializable;
+
 
 /**
  * {@code webhook_subscription} 表实体 —— MyBatis-Plus 骨架（对齐 {@code deploy/ddl/init.sql}）。
@@ -20,7 +22,7 @@ import java.io.Serializable;
  * 由数据库默认值（now() 等）填充。本类不含业务逻辑。
  */
 @TableName("webhook_subscription")
-public class WebhookSubscription implements Serializable {
+public class WebhookSubscription extends BaseAuditEntity {
 
     @TableId(type = IdType.AUTO)
     private Long id;
@@ -36,12 +38,6 @@ public class WebhookSubscription implements Serializable {
     private String secretRef;
 
     private String status;
-
-    private Long createdBy;
-
-    private Instant createdAt;
-
-    private Instant updatedAt;
 
     @Version
     private Long rowVersion;
@@ -100,30 +96,6 @@ public class WebhookSubscription implements Serializable {
 
     public void setStatus(String status) {
         this.status = status;
-    }
-
-    public Long getCreatedBy() {
-        return createdBy;
-    }
-
-    public void setCreatedBy(Long createdBy) {
-        this.createdBy = createdBy;
-    }
-
-    public Instant getCreatedAt() {
-        return createdAt;
-    }
-
-    public void setCreatedAt(Instant createdAt) {
-        this.createdAt = createdAt;
-    }
-
-    public Instant getUpdatedAt() {
-        return updatedAt;
-    }
-
-    public void setUpdatedAt(Instant updatedAt) {
-        this.updatedAt = updatedAt;
     }
 
     public Long getRowVersion() {
