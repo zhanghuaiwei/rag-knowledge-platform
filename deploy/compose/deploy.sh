@@ -20,12 +20,20 @@
 # 首次数据库初始化在 PostgreSQL 首次启动（空 pgdata 卷）时自动完成，
 # 由 db-init/01-init-db.sh 执行 deploy/ddl/init.sql；详见 04-数据库设计.md §9。
 # =====================================================================
+
+# 兼容：若被 sh/dash 调用（Debian/Ubuntu 默认 sh 不支持 pipefail / [[ ]] / 数组等），
+# 自动改用 bash 重新执行；直接 ./deploy.sh（走 shebang）时此步为 no-op
+if [ -z "${BASH_VERSION:-}" ]; then
+  command -v bash >/dev/null 2>&1 || { printf '缺少 bash，请安装 bash 或以 bash 运行本脚本\n' >&2; exit 1; }
+  exec bash "$0" "$@"
+fi
+
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-REQUIRED_ENV_KEYS=(POSTGRES_PASSWORD MINIO_ROOT_PASSWORD RAGKB_APP_PASSWORD RAGKB_MIGRATOR_PASSWORD)
+REQUIRED_ENV_KEYS=(POSTGRES_PASSWORD MINIO_ROOT_PASSWORD RAGKB_APP_PASSWORD RAGKB_MIGRATOR_PASSWORD REDIS_PASSWORD)
 WANTED_TABLES=48
 EXPECTED_ROLES=(ragkb_owner ragkb_migrator ragkb_app)
 
@@ -49,7 +57,14 @@ check_prereqs() {
   for f in docker-compose.yml ../ddl/init.sql db-init/01-init-db.sh; do
     [ -f "$f" ] || { warn "缺少必需文件: $f"; missing=1; }
   done
-  [ -x db-init/01-init-db.sh ] || { warn "db-init/01-init-db.sh 缺少执行权限（chmod +x）"; missing=1; }
+  # 上传（SCP/FTP/zip 解压）常丢失可执行位，这里自动修复；仅无法修复时才报错
+  if [ -f db-init/01-init-db.sh ] && [ ! -x db-init/01-init-db.sh ]; then
+    chmod +x db-init/01-init-db.sh 2>/dev/null \
+      || { warn "无法为 db-init/01-init-db.sh 设置执行权限（请手动 chmod +x）"; missing=1; }
+  fi
+  # 容器内镜像以 shebang 执行该脚本，必须为 bash（#!/bin/sh → Debian dash 不支持 pipefail）
+  head -1 db-init/01-init-db.sh 2>/dev/null | grep -q bash \
+    || { warn "db-init/01-init-db.sh 版本过旧：shebang 必须为 bash（请重新上传最新脚本）"; missing=1; }
   [ "$missing" -eq 0 ] || die "文件结构不完整，请按 deploy/ 目录结构完整上传后再运行"
 }
 
@@ -131,13 +146,19 @@ verify_roles() {
 summary() {
   printf '\n\033[1;32m部署完成。访问地址：\033[0m\n'
   printf '  PostgreSQL : 127.0.0.1:5432（库 ragkb，应用账号 ragkb_app）\n'
-  printf '  Redis      : 127.0.0.1:6379\n'
+  printf '  Redis      : 127.0.0.1:6379（已启用 requirepass，密码见 .env 的 REDIS_PASSWORD）\n'
   printf '  MinIO      : S3 127.0.0.1:9000 · Console http://127.0.0.1:9001\n'
   printf '\n后续：\n'
   printf '  * 应用连接 ragkb_app 的密码 = .env 的 RAGKB_APP_PASSWORD，需与 service 的 RAGKB_DB_PASSWORD 一致\n'
   printf '  * 查看密钥：cat .env（勿外传）\n'
   printf '  * 重建数据库：docker compose down -v 后重新 ./deploy.sh\n'
   printf '  * 查看初始化日志：docker logs ragkb-postgres | grep ragkb\n'
+  if grep -qE '^MIDDLEWARE_BIND_ADDRESS=0\.0\.0\.0' .env 2>/dev/null; then
+    printf '  \033[1;33m[公网暴露已开启] 请在云安全组放行 TCP 5432/6379/9000/9001，\033[0m\n'
+    printf '  \033[1;33m  并建议仅放行你的本机 IP（勿 0.0.0.0/0 全放行）\033[0m\n'
+  else
+    printf '  * 中间件默认仅本机监听；需公网直连时在 .env 设 MIDDLEWARE_BIND_ADDRESS=0.0.0.0\n'
+  fi
 }
 
 main() {

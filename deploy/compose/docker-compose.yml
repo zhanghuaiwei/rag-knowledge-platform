@@ -10,7 +10,10 @@
 # 安全边界（对齐 SECURITY.md / 04-数据库设计）：
 #   * 不硬编码任何密码 —— 从 .env 注入（.env 不提交仓库，模板见 deploy/compose/.env.example）。
 #   * 镜像使用固定 tag（生产禁用 latest，见 SECURITY.md）。
-#   * MinIO / PostgreSQL 仅暴露内网端口或本机；云服务器公网访问走安全组/反向代理。
+#   * 端口绑定地址由 MIDDLEWARE_BIND_ADDRESS 控制，默认 127.0.0.1（仅本机，安全姿态）；
+#     需公网直连时在 .env 显式设 MIDDLEWARE_BIND_ADDRESS=0.0.0.0，并配合云安全组
+#     仅放行必要端口 + 源 IP 白名单（不建议 0.0.0.0/0 全放行）。
+#   * Redis 强制 requirepass（密码取 .env REDIS_PASSWORD），公网暴露时绝不允许无认证。
 #   * 资源限制对齐 2G 实例：三个服务合计约 1.1G，留有系统与后续 app 余量。
 #
 # 使用：
@@ -42,8 +45,8 @@ services:
       RAGKB_APP_PASSWORD: ${RAGKB_APP_PASSWORD:?RAGKB_APP_PASSWORD required in .env}
       RAGKB_MIGRATOR_PASSWORD: ${RAGKB_MIGRATOR_PASSWORD:?RAGKB_MIGRATOR_PASSWORD required in .env}
     ports:
-      # 仅本机访问；云服务器公网由安全组控制
-      - "127.0.0.1:5432:5432"
+      # 绑定地址默认 127.0.0.1（仅本机）；公网直连需在 .env 设 MIDDLEWARE_BIND_ADDRESS=0.0.0.0
+      - "${MIDDLEWARE_BIND_ADDRESS:-127.0.0.1}:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       # 首次初始化（仅空 pgdata 卷时执行）：DDL 单文件 + 密码注入包装脚本
@@ -60,13 +63,19 @@ services:
     container_name: ragkb-redis
     restart: unless-stopped
     mem_limit: 256m
-    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "192mb", "--maxmemory-policy", "allkeys-lru"]
+    environment:
+      # 认证密码注入容器，供 healthcheck 使用；禁止写死明文
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD required in .env}
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "192mb", "--maxmemory-policy", "allkeys-lru", "--requirepass", "${REDIS_PASSWORD:?REDIS_PASSWORD required in .env}"]
     ports:
-      - "127.0.0.1:6379:6379"
+      # 绑定地址默认 127.0.0.1（仅本机）；公网直连需在 .env 设 MIDDLEWARE_BIND_ADDRESS=0.0.0.0
+      - "${MIDDLEWARE_BIND_ADDRESS:-127.0.0.1}:6379:6379"
     volumes:
       - redisdata:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      # requirepass 开启后必须带密码探测，否则恒为 NOAUTH 导致 unhealthy
+      # $$ 转义让 $REDIS_PASSWORD 在容器内求值（引用容器 env，而非 compose 层）
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping | grep -q PONG"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -81,9 +90,9 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER required in .env}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD required in .env}
     ports:
-      # 仅本机访问；云服务器公网由安全组控制
-      - "127.0.0.1:9000:9000"   # S3 API
-      - "127.0.0.1:9001:9001"   # Console
+      # 绑定地址默认 127.0.0.1（仅本机）；公网直连需在 .env 设 MIDDLEWARE_BIND_ADDRESS=0.0.0.0
+      - "${MIDDLEWARE_BIND_ADDRESS:-127.0.0.1}:9000:9000"   # S3 API
+      - "${MIDDLEWARE_BIND_ADDRESS:-127.0.0.1}:9001:9001"   # Console
     volumes:
       - miniodata:/data
     healthcheck:

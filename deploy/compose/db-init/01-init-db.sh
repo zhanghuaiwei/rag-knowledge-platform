@@ -1,6 +1,11 @@
-#!/bin/sh
+#!/usr/bin/env bash
 # =====================================================================
 # ragkb · PostgreSQL 首次初始化入口（挂载到 /docker-entrypoint-initdb.d/）
+#
+# 注意：shebang 必须是 bash。postgres 官方镜像对 /docker-entrypoint-initdb.d/
+#   下「可执行」的 .sh 会按其 shebang 直接执行，而镜像内 Debian 的 /bin/sh 是
+#   dash，不支持 set -o pipefail；本脚本必须由 bash 执行（不可执行被 source 时
+#   镜像入口本身也是 bash，同样安全）。
 #
 # 为什么需要这个包装脚本：
 #   deploy/ddl/init.sql 通过 psql 变量（-v）接收两个业务角色密码；而官方
