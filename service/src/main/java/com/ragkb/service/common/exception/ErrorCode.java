@@ -15,6 +15,12 @@ public enum ErrorCode {
     NOT_FOUND("E-1003", "资源不存在", HttpStatus.NOT_FOUND),
     CONFLICT("E-1004", "资源状态冲突", HttpStatus.CONFLICT),
     RATE_LIMITED("E-1005", "请求过于频繁，请稍后重试", HttpStatus.TOO_MANY_REQUESTS),
+    /** 本地账号锁定（失败锁定阈值触发，锁定期内拒绝登录）。 */
+    ACCOUNT_LOCKED("E-1006", "账号已锁定，请稍后再试", HttpStatus.LOCKED),
+    /** 密码已过期，须改密后才能继续使用（仅本地账号策略开启时）。 */
+    PASSWORD_EXPIRED("E-1007", "密码已过期，请修改后继续", HttpStatus.FORBIDDEN),
+    /** 首次登录/被重置后必须修改初始密码。 */
+    MUST_CHANGE_PASSWORD("E-1008", "首次登录须修改初始密码", HttpStatus.FORBIDDEN),
     INTERNAL_ERROR("E-9999", "系统繁忙，请稍后重试", HttpStatus.INTERNAL_SERVER_ERROR);
 
     private final String code;

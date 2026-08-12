@@ -1,4 +1,4 @@
-import type { CurrentUser, LoginInput } from "@/api-client/types";
+import type { ChangePasswordInput, CurrentUser, LoginInput } from "@/api-client/types";
 
 /** 认证域契约。 */
 export interface AuthApi {
@@ -9,4 +9,6 @@ export interface AuthApi {
   switchTenant(tenantId: number): Promise<CurrentUser>;
   /** 登出：吊销后端会话（黑名单 access + 吊销 refresh 家族）并清理本地内存 token。 */
   logout(): Promise<void>;
+  /** V0.5：自助修改当前用户密码（核验当前密码，清除 mustChangePassword）。 */
+  changePassword(input: ChangePasswordInput): Promise<void>;
 }

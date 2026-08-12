@@ -46,6 +46,15 @@ public interface AuthService {
      */
     AuthResult switchTenant(long tenantId);
 
+    /**
+     * 自助修改当前用户密码：核验 {@code currentPassword}（PasswordEncoder.matches）后
+     * 更新 BCrypt hash 并清除 {@code mustChangePassword}。
+     *
+     * <p>⚠️ 谨慎区（人工实现）：见 {@code AuthServiceImpl} 契约注释。当前会话不失效
+     * （不清 refresh 家族），后续请求凭据策略标志经 DB 重读自然清除。
+     */
+    void changePassword(long userId, String currentPassword, String newPassword);
+
     List<ApiKeyVo> listApiKeys();
 
     ApiKeyCreatedVo createApiKey(ApiKeyCreateDto request, String idempotencyKey);

@@ -8,7 +8,7 @@
  * access token 只进内存（lib/auth），不落 localStorage。
  */
 import type { AuthApi } from "@/api-client/contracts/auth";
-import type { CurrentUser, LoginInput } from "@/api-client/types";
+import type { ChangePasswordInput, CurrentUser, LoginInput } from "@/api-client/types";
 import { request, requestVoid, tryRefreshTokens } from "@/api-client/http/client";
 import { clearSession, getAccessToken, setAuth } from "@/lib/auth";
 
@@ -24,6 +24,9 @@ interface AuthSession {
   permissions?: string[];
   features?: string[];
   policyVersion?: number;
+  /** V0.5 本地账号（form+db）：首登/被重置后须改密。 */
+  mustChangePassword?: boolean | null;
+  passwordExpired?: boolean | null;
 }
 
 /** 登录/刷新/切租户响应（OpenAPI components/schemas/TokenResponse）。 */
@@ -55,6 +58,7 @@ function mapCurrentUser(session: AuthSession): CurrentUser {
       tenantRoles: tenant.tenantRoles ?? [],
     })),
     orgName: "", // 组织归属由服务端会话扩展后补充
+    mustChangePassword: session.mustChangePassword ?? false,
   };
 }
 
@@ -97,5 +101,14 @@ export const authApi: AuthApi = {
     } finally {
       clearSession();
     }
+  },
+
+  /** V0.5：自助修改当前用户密码（核验当前密码，成功后清除 mustChangePassword 标志）。 */
+  async changePassword(input: ChangePasswordInput) {
+    await requestVoid({
+      method: "POST",
+      url: "/auth/change-password",
+      data: { currentPassword: input.currentPassword, newPassword: input.newPassword },
+    });
   },
 };

@@ -3,24 +3,20 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import { Alert, Button, Divider, Form, Input } from "antd";
-import { ApartmentOutlined, LockOutlined, MailOutlined } from "@ant-design/icons";
+import { ApartmentOutlined, LockOutlined, UserOutlined } from "@ant-design/icons";
 
 import { api } from "@/api-client";
 import { isAuthed } from "@/lib/auth";
 
 /**
- * 开发/演示账号：开发阶段保留表单登录，供本地与演示环境使用。
- * 生产环境走 OIDC，由企业 IdP 承载认证与 MFA，表单登录不暴露。
+ * 表单登录：登录标识（用户名/邮箱）+ 密码，能否登录由后端数据库（user_credential/sys_user）决定，
+ * 不开放自助注册。企业部署可走 OIDC（SSO 按钮跳后端授权端点），由 IdP 承载认证。
  * 登录成功后由 api.login 持有 access token（内存），refresh 凭证走 HttpOnly cookie。
+ * ⚠️ 不在前端硬编码任何账号/口令（本地账号凭据只在数据库中维护）。
  */
-const DEV_ACCOUNTS = [
-  { email: "admin@ragkb.dev", password: "admin123", role: "管理员" },
-  { email: "user@ragkb.dev", password: "user123", role: "普通成员" },
-];
-const DEFAULT_DEV_ACCOUNT = DEV_ACCOUNTS[0];
 
 interface LoginFormValues {
-  email: string;
+  username: string;
   password: string;
 }
 
@@ -51,7 +47,12 @@ function LoginPageInner() {
   };
 
   const onFinish = (values: LoginFormValues) => {
-    void login(values.email.trim(), values.password);
+    void login(values.username.trim(), values.password);
+  };
+
+  // 企业 SSO：跳后端 OIDC 授权端点（仅 oidc 模式开放；form 模式后端不提供该端点）
+  const handleSsoLogin = () => {
+    window.location.href = "/api/v1/auth/authorize";
   };
 
   return (
@@ -71,14 +72,13 @@ function LoginPageInner() {
           onFinish={onFinish}
         >
           <Form.Item
-            name="email"
-            label="企业邮箱"
+            name="username"
+            label="登录账号 / 邮箱"
             rules={[
-              { required: true, message: "请输入企业邮箱" },
-              { type: "email", message: "请输入有效的企业邮箱" },
+              { required: true, message: "请输入登录账号或邮箱" },
             ]}
           >
-            <Input size="large" autoComplete="username" placeholder="name@company.com" prefix={<MailOutlined />} />
+            <Input size="large" autoComplete="username" placeholder="用户名或邮箱" prefix={<UserOutlined />} />
           </Form.Item>
           <Form.Item
             name="password"
@@ -99,21 +99,14 @@ function LoginPageInner() {
 
         <Divider plain>或</Divider>
 
-        <Button
-          block
-          size="large"
-          icon={<ApartmentOutlined />}
-          disabled={loading}
-          onClick={() => void login(DEFAULT_DEV_ACCOUNT.email, DEFAULT_DEV_ACCOUNT.password)}
-        >
+        <Button block size="large" icon={<ApartmentOutlined />} disabled={loading} onClick={handleSsoLogin}>
           使用企业 SSO 登录
         </Button>
 
         <p style={{ fontSize: 12, color: "var(--text-3)", marginTop: 18 }}>
-          开发账号（开发/演示环境生效，生产环境走 OIDC）：
-          {DEV_ACCOUNTS.map((a) => `${a.email} / ${a.password}（${a.role}）`).join(" · ")}
+          登录账号由管理员开通，平台不开放自助注册。
           <br />
-          企业平台不开放自助注册，成员由管理员邀请开通
+          本地/私有化部署的引导账号见部署运维文档，生产环境走企业 IdP 认证
         </p>
       </div>
     </div>

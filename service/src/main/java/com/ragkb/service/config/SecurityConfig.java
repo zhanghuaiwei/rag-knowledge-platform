@@ -5,6 +5,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
@@ -31,12 +32,15 @@ import org.springframework.security.web.context.SecurityContextRepository;
  * 认证安全配置——按环境变量开关切换登录方式：
  *
  * <ul>
- *   <li>{@code RAGKB_AUTH_MODE=form}（默认，开发/演示）：账号密码登录 + JWT。
- *       认证用内存用户（{@code RAGKB_DEV_USERNAME / RAGKB_DEV_PASSWORD / RAGKB_DEV_ROLES}），
+ *   <li>{@code RAGKB_AUTH_MODE=form}（默认，账号密码，本地账号体系）：登录判定来自数据库
+ *       （{@code user_credential}/{@code sys_user}，见 V0.4 迁移）；仅当
+ *       {@code RAGKB_DB_ENABLED=false}（脚手架无库兜底）时用内存 dev 用户
+ *       （{@code RAGKB_DEV_USERNAME / RAGKB_DEV_PASSWORD / RAGKB_DEV_ROLES}）。
  *       成功后签发 access token（响应体，前端仅内存持有）+ refresh token
  *       （HttpOnly cookie {@code ragkb_refresh}，轮换 + Redis 黑名单）；请求经
  *       {@link JwtAuthenticationFilter} 校验 {@code Authorization: Bearer}。
- *       JWT 签发/校验与 Redis 命令为人工实现点（{@code TokenServiceImpl} 与两个 Adapter）。</li>
+ *       JWT 签发/校验与 Redis 命令为人工实现点（{@code TokenServiceImpl} 与两个 Adapter）。
+ *       ⚠️ 凭据策略（失败锁定/密码过期）接线为人工实现点。</li>
  *   <li>{@code RAGKB_AUTH_MODE=oidc}（生产）：OIDC Authorization Code，由企业 IdP 承载认证，
  *       BFF 会话 cookie（JSESSIONID），配置见
  *       {@code RAGKB_OIDC_CLIENT_ID / RAGKB_OIDC_CLIENT_SECRET / RAGKB_OIDC_ISSUER_URI}。</li>
@@ -51,7 +55,7 @@ import org.springframework.security.web.context.SecurityContextRepository;
 @Configuration
 @EnableWebSecurity
 @EnableMethodSecurity
-@EnableConfigurationProperties(JwtTokenProperties.class)
+@EnableConfigurationProperties({JwtTokenProperties.class, LocalAuthProperties.class})
 public class SecurityConfig {
 
     /** 会话 cookie 存储（登录后 JSESSIONID 持久化 SecurityContext）。 */
@@ -84,7 +88,8 @@ public class SecurityConfig {
             HttpSecurity http,
             AuthenticationEntryPoint entryPoint,
             JwtAuthenticationFilter jwtFilter,
-            ObjectProvider<ApiKeyAuthenticationFilter> apiKeyFilterProvider) throws Exception {
+            ObjectProvider<ApiKeyAuthenticationFilter> apiKeyFilterProvider,
+            ObjectProvider<CredentialPolicyGateFilter> credentialPolicyGateProvider) throws Exception {
         http
                 .csrf(csrf -> csrf.disable()) // 脚手架说明见类注释
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
@@ -101,18 +106,22 @@ public class SecurityConfig {
                 .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
         apiKeyFilterProvider.ifAvailable(apiKeyFilter ->
                 http.addFilterBefore(apiKeyFilter, JwtAuthenticationFilter.class));
+        // 本地凭据策略门禁（db+form 时挂载）在 JWT 认证之后：重读凭据，强制首登改密/过期改密
+        credentialPolicyGateProvider.ifAvailable(gateFilter ->
+                http.addFilterAfter(gateFilter, JwtAuthenticationFilter.class));
         return http.build();
     }
 
-    /** 开发用内存用户（仅 form 模式；生产走 OIDC，不暴露表单登录）。 */
+    /** 脚手架无数据库兜底用的内存用户（db.enabled=false 且 mode=form 时生效；启用 DB 后由
+     *  {@code JdbcUserDetailsService} 从 user_credential 接管，登录判定落库）。 */
     @Bean
-    @ConditionalOnProperty(name = "ragkb.auth.mode", havingValue = "form", matchIfMissing = true)
+    @Conditional(IdentityConditions.NoDbFormMode.class)
     public UserDetailsService devUserDetailsService(
             @Value("${ragkb.auth.dev.username:admin}") String username,
             @Value("${ragkb.auth.dev.password:admin123}") String password,
             @Value("${ragkb.auth.dev.roles:TENANT_ADMIN}") String roles,
             PasswordEncoder passwordEncoder) {
-        // ⚠️ 开发专用：真实用户体系（sys_user / identity_account）由人工按 04-数据库设计 接入
+        // 仅无数据库时兜底：数据库用户体系见 JdbcUserDetailsService + user_credential（V0.4）
         UserDetails devUser = User.withUsername(username)
                 .password(passwordEncoder.encode(password))
                 .roles(roles.split(","))

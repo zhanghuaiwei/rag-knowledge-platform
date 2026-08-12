@@ -3,6 +3,7 @@ package com.ragkb.service.modules.identity.controller;
 import com.ragkb.service.common.api.ApiResponse;
 import com.ragkb.service.common.exception.ApiException;
 import com.ragkb.service.common.exception.ErrorCode;
+import com.ragkb.service.modules.identity.dto.ChangePasswordRequest;
 import com.ragkb.service.modules.identity.dto.LoginDto;
 import com.ragkb.service.modules.identity.dto.SwitchTenantDto;
 import com.ragkb.service.modules.identity.service.AuthService;
@@ -113,6 +114,27 @@ public class AuthController {
     @GetMapping("/api/v1/auth/session")
     public ApiResponse<AuthSessionVo> session() {
         return ApiResponse.ok(authService.session());
+    }
+
+    /**
+     * 自助修改当前登录用户密码（Bearer JWT）：核验当前密码后更新 BCrypt hash，
+     * 清除 {@code mustChangePassword}；当前会话保持。
+     */
+    @PostMapping("/api/v1/auth/change-password")
+    public ResponseEntity<Void> changePassword(@Valid @RequestBody ChangePasswordRequest request) {
+        long userId = currentUserId();
+        authService.changePassword(userId, request.currentPassword(), request.newPassword());
+        return ResponseEntity.noContent().build();
+    }
+
+    private long currentUserId() {
+        Authentication authentication = org.springframework.security.core.context.SecurityContextHolder
+                .getContext().getAuthentication();
+        if (authentication == null || !(authentication.getPrincipal()
+                instanceof com.ragkb.service.modules.identity.service.TokenService.JwtPrincipal principal)) {
+            throw new ApiException(ErrorCode.UNAUTHORIZED, "未认证或登录已过期");
+        }
+        return principal.userId();
     }
 
     /**

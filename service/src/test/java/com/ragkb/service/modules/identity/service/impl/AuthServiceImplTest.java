@@ -9,6 +9,7 @@ import com.ragkb.service.modules.identity.port.ApiKeyStorePort;
 import com.ragkb.service.modules.identity.port.IdentityDirectory;
 import com.ragkb.service.modules.identity.port.RefreshTokenStorePort;
 import com.ragkb.service.modules.identity.port.TokenBlacklistPort;
+import com.ragkb.service.modules.identity.port.UserCredentialStorePort;
 import com.ragkb.service.modules.identity.service.AuthService;
 import com.ragkb.service.modules.identity.service.TokenService;
 import com.ragkb.service.modules.identity.vo.AuthSessionVo;
@@ -54,6 +55,8 @@ class AuthServiceImplTest {
     @Mock private RefreshTokenStorePort refreshStore;
     @Mock private IdentityDirectory identityDirectory;
     @Mock private ObjectProvider<ApiKeyStorePort> apiKeyStoreProvider;
+    @Mock private ObjectProvider<UserCredentialStorePort> credentialStoreProvider;
+    @Mock private ObjectProvider<org.springframework.security.crypto.password.PasswordEncoder> passwordEncoderProvider;
 
     private final JwtTokenProperties properties = new JwtTokenProperties(
             "test-secret-0123456789abcdef0123456789abcdef", "ragkb",
@@ -66,7 +69,8 @@ class AuthServiceImplTest {
     @BeforeEach
     void setUp() {
         service = new AuthServiceImpl("form", properties, tokenService, blacklistPort,
-                refreshStore, identityDirectory, catalog, apiKeyCrypto, apiKeyStoreProvider);
+                refreshStore, identityDirectory, catalog, apiKeyCrypto, apiKeyStoreProvider,
+                credentialStoreProvider, passwordEncoderProvider);
         // 部分用例不调用 refreshTtl，lenient 避免 StrictStubs 误报
         lenient().when(tokenService.refreshTtl()).thenReturn(REFRESH_TTL);
     }

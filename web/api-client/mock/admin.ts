@@ -3,10 +3,13 @@ import type {
   ApiKey,
   AuditLogListParams,
   CreateApiKeyInput,
+  CreateUserInput,
   CreateWebhookInput,
   Org,
   OrgInput,
   PageParams,
+  ResetPasswordInput,
+  TenantRole,
   User,
   Webhook,
 } from "@/api-client/types";
@@ -29,6 +32,26 @@ export const adminApi: AdminApi = {
     await delay();
     return paginate(db.users, params.page, params.size);
   },
+  async createUser(input: CreateUserInput) {
+    await delay(300);
+    // 登录标识/邮箱查重（mock 用邮箱代理；真实唯一性由后端 user_credential 部分唯一索引保证）
+    if (db.users.some((u) => u.email === input.email)) {
+      throw new Error("登录账号已存在");
+    }
+    const user: User = {
+      id: nextId(db.users),
+      name: input.displayName.trim(),
+      email: input.email.trim(),
+      status: "ACTIVE",
+      roles: input.roles,
+      mustChangePassword: true, // 初始密码首登强制改密
+      orgName: "未分配",
+      lastLoginAt: null,
+    };
+    db.users.push(user);
+    appendAudit({ action: "user.create", resourceType: "USER", resourceId: user.id });
+    return user;
+  },
   async disableUser(id: number) {
     await delay(250);
     const user = findUser(id);
@@ -50,6 +73,26 @@ export const adminApi: AdminApi = {
     user.orgName = org?.name ?? "未分配";
     appendAudit({ action: "user.org.update", resourceType: "USER", resourceId: userId });
     return user;
+  },
+  async setRoles(userId: number, roles: TenantRole[]) {
+    await delay(250);
+    const user = findUser(userId);
+    user.roles = [...roles];
+    appendAudit({ action: "user.roles.update", resourceType: "USER", resourceId: userId });
+    return user;
+  },
+  async removeUser(userId: number) {
+    await delay(300);
+    const index = db.users.findIndex((item) => item.id === userId);
+    if (index < 0) notFound("用户");
+    db.users.splice(index, 1); // mock 移出租户即从列表移除（全局身份概念 mock 不建模）
+    appendAudit({ action: "user.remove", resourceType: "USER", resourceId: userId });
+  },
+  async resetPassword(userId: number, input: ResetPasswordInput) {
+    await delay(300);
+    const user = findUser(userId);
+    user.mustChangePassword = true; // 重置后首登强制改密
+    appendAudit({ action: "user.password.reset", resourceType: "USER", resourceId: userId });
   },
   async listOrgs() {
     await delay();

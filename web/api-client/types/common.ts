@@ -34,9 +34,20 @@ export interface CurrentUser {
   /** 可切换租户列表（租户切换下拉用）。 */
   tenants: { tenantId: number; tenantName: string; tenantRoles: string[] }[];
   orgName: string;
+  /** V0.5 本地账号：首登/被重置后须改密（前端据此重定向改密页）。 */
+  mustChangePassword?: boolean;
 }
 
-/** 账号密码登录入参（form 模式；生产 OIDC 由 IdP 承载认证）。 */
+/** 自助修改密码入参（对齐 OpenAPI ChangePasswordRequest）。 */
+export interface ChangePasswordInput {
+  currentPassword: string;
+  newPassword: string;
+}
+
+/**
+ * 表单登录入参。username 为登录标识（本地账号体系的用户名/邮箱），能否登录由后端数据库
+ * （user_credential/sys_user）决定；生产 OIDC 由企业 IdP 承载认证。
+ */
 export interface LoginInput {
   username: string;
   password: string;

@@ -16,8 +16,14 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth();
 
   useEffect(() => {
-    if (!loading && !user) {
+    if (loading) return;
+    if (!user) {
       router.replace(`/login?from=${encodeURIComponent(pathname)}`);
+      return;
+    }
+    // V0.5 本地账号：首登/被重置后须先改密才能进入其他页面
+    if (user.mustChangePassword && pathname !== "/change-password") {
+      router.replace("/change-password");
     }
   }, [loading, user, pathname, router]);
 
