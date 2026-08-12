@@ -5,7 +5,6 @@ import com.ragkb.service.modules.admin.vo.AuditLogEntryVo;
 import com.ragkb.service.modules.admin.vo.NotificationItemVo;
 import com.ragkb.service.modules.admin.vo.OrgVo;
 import com.ragkb.service.modules.admin.dto.OrgDto;
-import com.ragkb.service.modules.admin.vo.UserVo;
 import com.ragkb.service.modules.admin.vo.WebhookVo;
 import com.ragkb.service.modules.admin.vo.WebhookDeliveryVo;
 import com.ragkb.service.modules.admin.dto.WebhookDto;
@@ -14,17 +13,13 @@ import com.ragkb.service.modules.admin.dto.WebhookToggleDto;
 import java.util.List;
 
 /**
- * 管理中心用例：成员 / 组织 / 审计 / WebhookVo / 通知（实现点由人工完成）。
+ * 管理中心用例：组织 / 审计 / WebhookVo / 通知（实现点由人工完成）。
+ *
+ * <p>V0.5 起成员账号管理（建号/角色/停用/移出/改密/组织调整）全部迁至 identity 模块
+ * {@link com.ragkb.service.modules.identity.service.UserAccountService}，
+ * 本接口只保留组织目录 / 审计 / WebhookVo / 通知（均为 admin 模块持久化，跨模块安全）。
  */
 public interface AdminService {
-
-    PageData<UserVo> listUsers(int page, int size);
-
-    UserVo disableUser(long userId);
-
-    UserVo enableUser(long userId);
-
-    UserVo updateUserOrg(long userId, Long orgId);
 
     List<OrgVo> listOrgs();
 

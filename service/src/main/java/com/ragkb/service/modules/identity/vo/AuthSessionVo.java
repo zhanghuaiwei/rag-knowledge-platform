@@ -25,5 +25,7 @@ public record AuthSessionVo(
         List<String> credentialScopes,
         List<String> permissions,
         List<String> features,
-        long policyVersion) {
+        long policyVersion,
+        Boolean mustChangePassword,
+        Boolean passwordExpired) {
 }

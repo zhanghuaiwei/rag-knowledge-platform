@@ -6,7 +6,6 @@ import com.ragkb.service.modules.admin.vo.AuditLogEntryVo;
 import com.ragkb.service.modules.admin.vo.NotificationItemVo;
 import com.ragkb.service.modules.admin.vo.OrgVo;
 import com.ragkb.service.modules.admin.dto.OrgDto;
-import com.ragkb.service.modules.admin.vo.UserVo;
 import com.ragkb.service.modules.admin.vo.WebhookVo;
 import com.ragkb.service.modules.admin.vo.WebhookDeliveryVo;
 import com.ragkb.service.modules.admin.dto.WebhookDto;
@@ -17,30 +16,10 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 
 /**
- * 管理中心桩实现（实现点由人工替换）。
+ * 管理中心桩实现（实现点由人工替换）。成员账号管理已迁 identity 模块，见 UserAccountService。
  */
 @Service
 public class AdminServiceImpl implements AdminService {
-
-    @Override
-    public PageData<UserVo> listUsers(int page, int size) {
-        return TodoSupport.notImplemented("AdminService#listUsers");
-    }
-
-    @Override
-    public UserVo disableUser(long userId) {
-        return TodoSupport.notImplemented("AdminService#disableUser");
-    }
-
-    @Override
-    public UserVo enableUser(long userId) {
-        return TodoSupport.notImplemented("AdminService#enableUser");
-    }
-
-    @Override
-    public UserVo updateUserOrg(long userId, Long orgId) {
-        return TodoSupport.notImplemented("AdminService#updateUserOrg");
-    }
 
     @Override
     public List<OrgVo> listOrgs() {

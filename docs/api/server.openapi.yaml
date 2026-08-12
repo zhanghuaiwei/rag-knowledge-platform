@@ -190,6 +190,8 @@ components:
           description: 租户套餐、部署模式或后端能力是否可用
           items: { type: string }
         policyVersion: { type: integer, format: int64, description: "授权策略版本" }
+        mustChangePassword: { type: boolean, nullable: true, description: "仅 form+db 模式：首登/重置后须改密，前端据此重定向改密页" }
+        passwordExpired: { type: boolean, nullable: true, description: "仅 form+db 模式：密码已过期须改密" }
     TokenResponse:
       type: object
       description: |
@@ -618,6 +620,10 @@ components:
       properties:
         name: { type: string, maxLength: 128 }
         parentId: { type: integer, format: int64, nullable: true }
+    TenantRole:
+      type: string
+      description: 租户级角色枚举（与 tenant_member_role.role CHECK 一致）
+      enum: [TENANT_ADMIN, SECURITY_ADMIN, KNOWLEDGE_ADMIN, AUDITOR, MEMBER]
     User:
       type: object
       description: 租户成员视图（管理中心；与全局 sys_user 分离展示）
@@ -626,9 +632,49 @@ components:
         name: { type: string }
         email: { type: string }
         status: { type: string, enum: [ACTIVE, DISABLED] }
-        role: { type: string, enum: [TENANT_ADMIN, SECURITY_ADMIN, KNOWLEDGE_ADMIN, AUDITOR, MEMBER] }
+        roles:
+          type: array
+          description: 该用户在租户的全部角色（多角色；非最高单角色）
+          items: { $ref: "#/components/schemas/TenantRole" }
+        mustChangePassword: { type: boolean, description: "首次登录/被重置后须改密" }
         orgName: { type: string, nullable: true }
         lastLoginAt: { type: string, format: date-time, nullable: true }
+    CreateLocalUserRequest:
+      type: object
+      required: [username, email, displayName, password, roles]
+      properties:
+        username: { type: string, maxLength: 254, description: "登录标识；lower(username) 全局唯一（仅未逻辑删除行，V0.5 部分唯一索引）" }
+        email: { type: string, maxLength: 254, format: email }
+        displayName: { type: string, maxLength: 128 }
+        password: { type: string, minLength: 6, maxLength: 72, description: "初始密码（BCrypt 72 字节上限）；首登强制改密" }
+        roles:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/TenantRole" }
+    RoleSetRequest:
+      type: object
+      required: [roles]
+      properties:
+        roles:
+          type: array
+          minItems: 1
+          description: "整体替换当前租户角色（overwrite 语义，后端整组替换）"
+          items: { $ref: "#/components/schemas/TenantRole" }
+    ResetPasswordRequest:
+      type: object
+      required: [newPassword]
+      properties:
+        newPassword: { type: string, minLength: 6, maxLength: 72, description: "重置后的临时密码；置 mustChangePassword 首登强制改密" }
+    ChangePasswordRequest:
+      type: object
+      required: [currentPassword, newPassword]
+      properties:
+        currentPassword: { type: string, description: "当前密码（自助改密必须核验）" }
+        newPassword: { type: string, minLength: 6, maxLength: 72 }
+    CredentialPolicyError:
+      description: 凭据策略错误信封；code ∈ {E-1006 账号锁定, E-1007 密码过期, E-1008 首登需改密}
+      allOf:
+        - { $ref: "#/components/schemas/Error" }
     NotificationItem:
       type: object
       description: 租户内用户通知（任务完成/失败、审核待办、配额告警、系统通知）
@@ -798,6 +844,26 @@ paths:
                       data: { $ref: "#/components/schemas/TokenResponse" }
         "403":
           $ref: "#/components/responses/Forbidden"
+  /api/v1/auth/change-password:
+    post:
+      tags: [auth]
+      summary: 自助修改密码（当前登录用户）：核验当前密码后更新 BCrypt hash，清除 mustChangePassword
+      security:
+        - bearerJwt: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangePasswordRequest"
+      responses:
+        "204":
+          description: 修改成功（当前会话保持，后续访问凭据策略标志清除）
+        "400":
+          description: 当前密码错误或新密码不符合策略（E-1000）
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
 
   /api/v1/api-keys:
     get:
@@ -2518,6 +2584,33 @@ paths:
                                 items: { $ref: "#/components/schemas/User" }
         "403":
           $ref: "#/components/responses/Forbidden"
+    post:
+      tags: [integration]
+      summary: 创建本地用户（TENANT_ADMIN）：sys_user + user_credential(初始密码,首登强制改密) + 租户成员 + 角色，单事务
+      security:
+        - bearerJwt: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateLocalUserRequest"
+      responses:
+        "201":
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/User" }
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: 登录标识已存在（部分唯一索引冲突，映射 E-1004）
+          $ref: "#/components/responses/Conflict"
   /api/v1/users/{userId}/enable:
     parameters:
       - name: userId
@@ -2588,6 +2681,81 @@ paths:
                   - type: object
                     properties:
                       data: { $ref: "#/components/schemas/User" }
+  /api/v1/users/{userId}/roles:
+    parameters:
+      - name: userId
+        in: path
+        required: true
+        schema: { type: integer, format: int64 }
+    put:
+      tags: [integration]
+      summary: 覆盖式替换租户角色（TENANT_ADMIN；整体替换，非增量）
+      security:
+        - bearerJwt: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RoleSetRequest"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiResponse" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/User" }
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+  /api/v1/users/{userId}/reset-password:
+    parameters:
+      - name: userId
+        in: path
+        required: true
+        schema: { type: integer, format: int64 }
+    post:
+      tags: [integration]
+      summary: 管理员重置用户密码（TENANT_ADMIN；置 mustChangePassword 首登强制改密）
+      security:
+        - bearerJwt: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResetPasswordRequest"
+      responses:
+        "204":
+          description: 重置成功
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: 用户不属于当前租户
+          $ref: "#/components/responses/NotFound"
+  /api/v1/users/{userId}:
+    parameters:
+      - name: userId
+        in: path
+        required: true
+        schema: { type: integer, format: int64 }
+    delete:
+      tags: [integration]
+      summary: 移出当前租户（TENANT_ADMIN）：硬删 tenant_member(级联角色/部门关联)，全局 sys_user/user_credential 保留
+      security:
+        - bearerJwt: []
+      responses:
+        "204":
+          description: 已移出当前租户
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: 用户不属于当前租户
+          $ref: "#/components/responses/NotFound"
 
   /api/v1/notifications:
     get:

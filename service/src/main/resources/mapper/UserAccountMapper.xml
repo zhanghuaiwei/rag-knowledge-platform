@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ragkb.service.modules.identity.persistence.mapper.UserAccountMapper">
+
+    <!--
+        租户成员账号只读查询（管理中心用户列表）。
+        跨表 JOIN 在 identity 模块内完成（不跨 Java 模块依赖 admin 的持久化层），
+        SQL 层面直连 sys_user_org / sys_org 表，各 JOIN 手写 del_flag = 0
+        （MyBatis-Plus @TableLogic 不作用于手写 XML）。
+    -->
+
+    <resultMap id="UserAccountRowMap" type="com.ragkb.service.modules.identity.persistence.row.UserAccountRow">
+        <result property="userId" column="user_id"/>
+        <result property="displayName" column="display_name"/>
+        <result property="primaryEmail" column="primary_email"/>
+        <result property="memberStatus" column="member_status"/>
+        <result property="lastLoginAt" column="last_login_at"/>
+        <result property="mustChangePassword" column="must_change_password"/>
+    </resultMap>
+
+    <resultMap id="UserRoleRowMap" type="com.ragkb.service.modules.identity.persistence.row.UserRoleRow">
+        <result property="userId" column="user_id"/>
+        <result property="role" column="role"/>
+    </resultMap>
+
+    <resultMap id="UserOrgRowMap" type="com.ragkb.service.modules.identity.persistence.row.UserOrgRow">
+        <result property="userId" column="user_id"/>
+        <result property="orgName" column="org_name"/>
+    </resultMap>
+
+    <sql id="memberColumns">
+        su.id                   AS user_id,
+        su.display_name         AS display_name,
+        su.primary_email        AS primary_email,
+        tm.status               AS member_status,
+        su.last_login_at        AS last_login_at,
+        uc.must_change_password AS must_change_password
+    </sql>
+
+    <sql id="memberFrom">
+        FROM tenant_member tm
+        JOIN sys_user su
+          ON su.id = tm.user_id
+         AND su.del_flag = 0
+        LEFT JOIN user_credential uc
+          ON uc.user_id = tm.user_id
+         AND uc.del_flag = 0
+        WHERE tm.tenant_id = #{tenantId}
+          AND tm.del_flag = 0
+    </sql>
+
+    <select id="selectMemberPage" resultMap="UserAccountRowMap">
+        SELECT
+        <include refid="memberColumns"/>
+        <include refid="memberFrom"/>
+        ORDER BY su.display_name, su.id
+        LIMIT #{size} OFFSET #{offset}
+    </select>
+
+    <select id="selectMembers" resultMap="UserAccountRowMap">
+        SELECT
+        <include refid="memberColumns"/>
+        <include refid="memberFrom"/>
+          AND tm.user_id IN
+        <foreach collection="userIds" item="uid" open="(" separator="," close=")">
+            #{uid}
+        </foreach>
+        ORDER BY su.display_name, su.id
+    </select>
+
+    <select id="selectMemberRoles" resultMap="UserRoleRowMap">
+        SELECT tmr.user_id,
+               tmr.role
+        FROM tenant_member_role tmr
+        WHERE tmr.tenant_id = #{tenantId}
+          AND tmr.del_flag = 0
+          AND tmr.user_id IN
+        <foreach collection="userIds" item="uid" open="(" separator="," close=")">
+            #{uid}
+        </foreach>
+        ORDER BY tmr.role
+    </select>
+
+    <select id="selectMemberOrgs" resultMap="UserOrgRowMap">
+        SELECT suo.user_id,
+               so.name AS org_name
+        FROM sys_user_org suo
+        JOIN sys_org so
+          ON so.tenant_id = suo.tenant_id
+         AND so.id = suo.org_id
+         AND so.del_flag = 0
+         AND so.status = 'ACTIVE'
+        WHERE suo.tenant_id = #{tenantId}
+          AND suo.del_flag = 0
+          AND suo.user_id IN
+        <foreach collection="userIds" item="uid" open="(" separator="," close=")">
+            #{uid}
+        </foreach>
+        ORDER BY so.name
+    </select>
+
+    <select id="countMembers" resultType="long">
+        SELECT count(*)
+        FROM tenant_member tm
+        WHERE tm.tenant_id = #{tenantId}
+          AND tm.del_flag = 0
+    </select>
+
+    <delete id="deleteMemberOrgs">
+        DELETE FROM sys_user_org
+        WHERE tenant_id = #{tenantId}
+          AND user_id = #{userId}
+    </delete>
+
+    <insert id="insertMemberOrg">
+        INSERT INTO sys_user_org (tenant_id, user_id, org_id, source)
+        VALUES (#{tenantId}, #{userId}, #{orgId}, 'LOCAL')
+        ON CONFLICT (tenant_id, user_id, org_id) DO NOTHING
+    </insert>
+
+    <select id="countOrgInTenant" resultType="long">
+        SELECT count(*)
+        FROM sys_org so
+        WHERE so.tenant_id = #{tenantId}
+          AND so.id = #{orgId}
+          AND so.del_flag = 0
+          AND so.status = 'ACTIVE'
+    </select>
+
+</mapper>

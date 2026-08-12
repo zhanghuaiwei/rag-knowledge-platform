@@ -8,11 +8,14 @@ import type {
   AuditLog,
   AuditLogListParams,
   CreateApiKeyInput,
+  CreateUserInput,
   CreateWebhookInput,
   Org,
   OrgInput,
   PageParams,
   PageResult,
+  ResetPasswordInput,
+  TenantRole,
   User,
   Webhook,
 } from "@/api-client/types";
@@ -25,6 +28,10 @@ export const adminApi: AdminApi = {
       url: "/users",
       params: { page: params.page ?? 1, size: params.size ?? 20 },
     });
+  },
+
+  async createUser(input: CreateUserInput) {
+    return request<User>({ method: "POST", url: "/users", data: input });
   },
 
   async disableUser(id: number) {
@@ -41,6 +48,22 @@ export const adminApi: AdminApi = {
       url: `/users/${userId}/org`,
       data: { orgId },
     });
+  },
+
+  async setRoles(userId: number, roles: TenantRole[]) {
+    return request<User>({
+      method: "PUT",
+      url: `/users/${userId}/roles`,
+      data: { roles },
+    });
+  },
+
+  async removeUser(userId: number) {
+    await requestVoid({ method: "DELETE", url: `/users/${userId}` });
+  },
+
+  async resetPassword(userId: number, input: ResetPasswordInput) {
+    await requestVoid({ method: "POST", url: `/users/${userId}/reset-password`, data: input });
   },
 
   async listOrgs() {

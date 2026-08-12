@@ -1,5 +1,5 @@
 import type { AuthApi } from "@/api-client/contracts/auth";
-import type { LoginInput } from "@/api-client/types";
+import type { ChangePasswordInput, LoginInput } from "@/api-client/types";
 import { clearSession, getAccessToken, setAuth } from "@/lib/auth";
 import { db, delay } from "@/mocks/db";
 
@@ -32,5 +32,14 @@ export const authApi: AuthApi = {
   async logout() {
     await delay();
     clearSession();
+  },
+
+  /** V0.5：自助修改密码（mock 仅校验长度并清除 mustChangePassword 标志）。 */
+  async changePassword(input: ChangePasswordInput) {
+    await delay(300);
+    if (!input.newPassword || input.newPassword.length < 6) {
+      throw new Error("新密码至少 6 位");
+    }
+    db.currentUser.mustChangePassword = false;
   },
 };

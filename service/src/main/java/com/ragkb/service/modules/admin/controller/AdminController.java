@@ -5,18 +5,15 @@ import com.ragkb.service.common.api.PageData;
 import com.ragkb.service.modules.admin.vo.AuditLogEntryVo;
 import com.ragkb.service.modules.admin.vo.OrgVo;
 import com.ragkb.service.modules.admin.dto.OrgDto;
-import com.ragkb.service.modules.admin.dto.UserOrgDto;
 import com.ragkb.service.modules.admin.dto.WebhookDto;
 import com.ragkb.service.modules.admin.dto.WebhookToggleDto;
-import com.ragkb.service.modules.admin.vo.AuditLogEntryVo;
-import com.ragkb.service.modules.admin.vo.OrgVo;
-import com.ragkb.service.modules.admin.vo.UserVo;
 import com.ragkb.service.modules.admin.vo.WebhookDeliveryVo;
 import com.ragkb.service.modules.admin.vo.WebhookVo;
 import com.ragkb.service.modules.admin.service.AdminService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -31,9 +28,12 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.List;
 
 /**
- * 管理中心接口入口：成员 / 组织 / 审计 / WebhookVo。业务实现见 {@link AdminService}。
+ * 管理中心接口入口：组织 / 审计 / WebhookVo。业务实现见 {@link AdminService}。
  *
- * <p>用户管理（users）端点 OpenAPI 草案未定义，为产品契约所需新增。
+ * <p>V0.5 起成员账号管理端点（/api/v1/users*）迁至 identity 模块
+ * {@code UserAccountController}（类级 {@code tenant-member:manage}）。
+ * 本类各资源按权限码方法级门禁：组织 → {@code tenant-member:manage}、
+ * 审计 → {@code audit:read}、WebhookVo → {@code webhook:manage}。
  */
 @RestController
 public class AdminController {
@@ -44,39 +44,17 @@ public class AdminController {
         this.adminService = adminService;
     }
 
-    // ---- 成员 ----
-
-    @GetMapping("/api/v1/users")
-    public ApiResponse<PageData<UserVo>> listUsers(
-            @RequestParam(defaultValue = "1") int page,
-            @RequestParam(defaultValue = "20") int size) {
-        return ApiResponse.ok(adminService.listUsers(page, size));
-    }
-
-    @PostMapping("/api/v1/users/{userId}/disable")
-    public ApiResponse<UserVo> disableUser(@PathVariable long userId) {
-        return ApiResponse.ok(adminService.disableUser(userId));
-    }
-
-    @PostMapping("/api/v1/users/{userId}/enable")
-    public ApiResponse<UserVo> enableUser(@PathVariable long userId) {
-        return ApiResponse.ok(adminService.enableUser(userId));
-    }
-
-    @PatchMapping("/api/v1/users/{userId}/org")
-    public ApiResponse<UserVo> updateUserOrg(@PathVariable long userId, @RequestBody UserOrgDto request) {
-        return ApiResponse.ok(adminService.updateUserOrg(userId, request.orgId()));
-    }
-
     // ---- 组织 ----
 
     @GetMapping("/api/v1/orgs")
+    @PreAuthorize("hasAuthority('tenant-member:manage')")
     public ApiResponse<List<OrgVo>> listOrgs() {
         return ApiResponse.ok(adminService.listOrgs());
     }
 
     @PostMapping("/api/v1/orgs")
     @ResponseStatus(HttpStatus.CREATED)
+    @PreAuthorize("hasAuthority('tenant-member:manage')")
     public ApiResponse<OrgVo> createOrg(
             @Valid @RequestBody OrgDto request,
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
@@ -84,11 +62,13 @@ public class AdminController {
     }
 
     @PatchMapping("/api/v1/orgs/{orgId}")
+    @PreAuthorize("hasAuthority('tenant-member:manage')")
     public ApiResponse<OrgVo> updateOrg(@PathVariable long orgId, @Valid @RequestBody OrgDto request) {
         return ApiResponse.ok(adminService.updateOrg(orgId, request));
     }
 
     @DeleteMapping("/api/v1/orgs/{orgId}")
+    @PreAuthorize("hasAuthority('tenant-member:manage')")
     public ResponseEntity<Void> deleteOrg(@PathVariable long orgId) {
         adminService.deleteOrg(orgId);
         return ResponseEntity.noContent().build();
@@ -97,6 +77,7 @@ public class AdminController {
     // ---- 审计 ----
 
     @GetMapping("/api/v1/audit-logs")
+    @PreAuthorize("hasAuthority('audit:read')")
     public ApiResponse<PageData<AuditLogEntryVo>> listAuditLogs(
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "20") int size,
@@ -113,12 +94,14 @@ public class AdminController {
     // ---- WebhookVo ----
 
     @GetMapping("/api/v1/webhook-subscriptions")
+    @PreAuthorize("hasAuthority('webhook:manage')")
     public ApiResponse<List<WebhookVo>> listWebhooks() {
         return ApiResponse.ok(adminService.listWebhooks());
     }
 
     @PostMapping("/api/v1/webhook-subscriptions")
     @ResponseStatus(HttpStatus.CREATED)
+    @PreAuthorize("hasAuthority('webhook:manage')")
     public ApiResponse<WebhookVo> createWebhook(
             @Valid @RequestBody WebhookDto request,
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
@@ -126,6 +109,7 @@ public class AdminController {
     }
 
     @PatchMapping("/api/v1/webhook-subscriptions/{subscriptionId}")
+    @PreAuthorize("hasAuthority('webhook:manage')")
     public ApiResponse<WebhookVo> toggleWebhook(
             @PathVariable long subscriptionId,
             @Valid @RequestBody WebhookToggleDto request) {
@@ -133,12 +117,14 @@ public class AdminController {
     }
 
     @DeleteMapping("/api/v1/webhook-subscriptions/{subscriptionId}")
+    @PreAuthorize("hasAuthority('webhook:manage')")
     public ResponseEntity<Void> deleteWebhook(@PathVariable long subscriptionId) {
         adminService.deleteWebhook(subscriptionId);
         return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/api/v1/webhook-deliveries")
+    @PreAuthorize("hasAuthority('webhook:manage')")
     public ApiResponse<PageData<WebhookDeliveryVo>> listWebhookDeliveries(
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "20") int size,

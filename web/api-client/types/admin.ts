@@ -1,14 +1,41 @@
 /** 管理中心域类型：成员 / 组织 / 审计 / API Key / Webhook。 */
 import type { PageParams } from "@/api-client/types/common";
 
+/** 租户角色（对齐后端 tenant_member_role.role CHECK，V0.5 用户体系）。 */
+export type TenantRole =
+  | "TENANT_ADMIN"
+  | "SECURITY_ADMIN"
+  | "KNOWLEDGE_ADMIN"
+  | "AUDITOR"
+  | "MEMBER";
+
 export interface User {
   id: number;
   name: string;
   email: string;
   status: "ACTIVE" | "DISABLED";
-  role: string;
+  /** V0.5：多角色（原单 role 字段废弃）。 */
+  roles: TenantRole[];
+  /** 首登/被重置后须改密。 */
+  mustChangePassword: boolean;
   orgName: string;
-  lastLoginAt: string;
+  lastLoginAt: string | null;
+}
+
+export interface CreateUserInput {
+  username: string;
+  email: string;
+  displayName: string;
+  password: string;
+  roles: TenantRole[];
+}
+
+export interface RoleSetInput {
+  roles: TenantRole[];
+}
+
+export interface ResetPasswordInput {
+  newPassword: string;
 }
 
 export interface Org {

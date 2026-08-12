@@ -67,10 +67,12 @@ ragkb:
   # 实现数据层时置 RAGKB_DB_ENABLED=true 并配置上方 spring.datasource 凭证。
   db:
     enabled: ${RAGKB_DB_ENABLED:false}
-  # 认证模式：form（开发默认，账号密码）| oidc（生产，企业 IdP）
+  # 认证模式：form（账号密码，本地账号体系）| oidc（企业 IdP）
+  #  form：ragkb.db.enabled=true 时登录判定来自 user_credential/sys_user（见 V0.4 迁移），
+  #        无数据库时降级为下方 dev 内存账号（仅脚手架兜底）。
   auth:
     mode: ${RAGKB_AUTH_MODE:form}
-    # form 模式开发用内存账号（⚠️ 仅开发/演示，生产走 oidc 不暴露表单登录）
+    # form 模式无数据库兜底用的内存账号（db.enabled=false 时生效，仅脚手架/本地演示）
     dev:
       username: ${RAGKB_DEV_USERNAME:admin}
       password: ${RAGKB_DEV_PASSWORD:admin123}
@@ -80,6 +82,11 @@ ragkb:
       client-id: ${RAGKB_OIDC_CLIENT_ID:}
       client-secret: ${RAGKB_OIDC_CLIENT_SECRET:}
       issuer-uri: ${RAGKB_OIDC_ISSUER_URI:}
+    # 本地账号凭据策略（form 模式 + 数据库时生效；凭据策略接线为人工实现点）
+    local:
+      max-failed-attempts: ${RAGKB_LOCAL_MAX_FAILED_ATTEMPTS:5}
+      lockout-minutes: ${RAGKB_LOCAL_LOCKOUT_MINUTES:15}
+      password-expiry-days: ${RAGKB_LOCAL_PASSWORD_EXPIRY_DAYS:180}
   # JWT（form 模式）：secret 生产必须通过 RAGKB_JWT_SECRET 注入（>=32 字节随机串，禁止硬编码）。
   # 下方默认值仅为本地 dev 启动兜底（TokenServiceImpl 校验 >=32 字节，弱密钥/空值拒绝启动）；
   # ⚠️ form 模式仅限开发/演示，生产走 oidc 由企业 IdP 承载认证，不依赖本 secret。

@@ -10,8 +10,10 @@ import com.ragkb.service.modules.identity.port.ApiKeyStorePort;
 import com.ragkb.service.modules.identity.port.IdentityDirectory;
 import com.ragkb.service.modules.identity.port.RefreshTokenStorePort;
 import com.ragkb.service.modules.identity.port.TokenBlacklistPort;
+import com.ragkb.service.modules.identity.port.UserCredentialStorePort;
 import com.ragkb.service.modules.identity.service.AuthService;
 import com.ragkb.service.modules.identity.service.TokenService;
+import com.ragkb.service.util.TodoSupport;
 import com.ragkb.service.modules.identity.vo.ApiKeyCreatedVo;
 import com.ragkb.service.modules.identity.vo.ApiKeyVo;
 import com.ragkb.service.modules.identity.vo.AuthSessionVo;
@@ -23,6 +25,7 @@ import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.core.oidc.user.OidcUser;
 import org.springframework.stereotype.Service;
 
@@ -57,6 +60,8 @@ public class AuthServiceImpl implements AuthService {
     private final PermissionCatalog permissionCatalog;
     private final ApiKeyCrypto apiKeyCrypto;
     private final ObjectProvider<ApiKeyStorePort> apiKeyStoreProvider;
+    private final ObjectProvider<UserCredentialStorePort> credentialStoreProvider;
+    private final ObjectProvider<PasswordEncoder> passwordEncoderProvider;
 
     /** 进程内幂等去重（{@code tenantId:operation:key} → seen）。⚠️ 全量幂等落 idempotency_record 为人工实现点。 */
     private final Map<String, Boolean> idempotencySeen = new ConcurrentHashMap<>();
@@ -70,7 +75,9 @@ public class AuthServiceImpl implements AuthService {
             IdentityDirectory identityDirectory,
             PermissionCatalog permissionCatalog,
             ApiKeyCrypto apiKeyCrypto,
-            ObjectProvider<ApiKeyStorePort> apiKeyStoreProvider) {
+            ObjectProvider<ApiKeyStorePort> apiKeyStoreProvider,
+            ObjectProvider<UserCredentialStorePort> credentialStoreProvider,
+            ObjectProvider<PasswordEncoder> passwordEncoderProvider) {
         this.authMode = authMode;
         this.jwtProperties = jwtProperties;
         this.tokenService = tokenService;
@@ -80,6 +87,8 @@ public class AuthServiceImpl implements AuthService {
         this.permissionCatalog = permissionCatalog;
         this.apiKeyCrypto = apiKeyCrypto;
         this.apiKeyStoreProvider = apiKeyStoreProvider;
+        this.credentialStoreProvider = credentialStoreProvider;
+        this.passwordEncoderProvider = passwordEncoderProvider;
     }
 
     @Override
@@ -269,6 +278,7 @@ public class AuthServiceImpl implements AuthService {
         Set<String> permissionSet = permissionCatalog.permissionsForRoles(active.roles());
         List<String> permissions = new ArrayList<>(permissionSet);
         List<String> features = new ArrayList<>(permissionCatalog.featuresFor(permissionSet));
+        CredentialPolicyFlags flags = credentialPolicyFlags(identity.userId());
         return new AuthSessionVo(
                 identity.userId(),
                 identity.subjectKey(),
@@ -279,7 +289,48 @@ public class AuthServiceImpl implements AuthService {
                 List.of(CREDENTIAL_SCOPE_WEB),
                 permissions,
                 features,
-                active.policyVersion());
+                active.policyVersion(),
+                flags.mustChangePassword(),
+                flags.passwordExpired());
+    }
+
+    /**
+     * 会话携带本地凭据策略标志（form+db 模式才有值；oidc/无 DB 返回 null）。
+     *
+     * <p>⚠️ 谨慎区（人工复核）：密码过期判定（{@code password_expires_at < now}）与
+     * {@code ragkb.auth.local.password-expiry-days > 0} 是否启用、以及
+     * {@code CredentialPolicyGateFilter} 的门禁一致性，需人工确认。
+     */
+    private CredentialPolicyFlags credentialPolicyFlags(long userId) {
+        UserCredentialStorePort store = credentialStoreProvider.getIfAvailable();
+        if (store == null) {
+            // 无本地凭据存储（oidc 模式或无 DB）：本地账号凭据策略不适用
+            return new CredentialPolicyFlags(null, null);
+        }
+        return store.findByUserId(userId)
+                .map(cred -> new CredentialPolicyFlags(
+                        cred.mustChangePassword(),
+                        cred.passwordExpiresAt() != null && cred.passwordExpiresAt().isBefore(Instant.now())))
+                .orElseGet(() -> new CredentialPolicyFlags(null, null));
+    }
+
+    private record CredentialPolicyFlags(Boolean mustChangePassword, Boolean passwordExpired) {
+    }
+
+    @Override
+    public void changePassword(long userId, String currentPassword, String newPassword) {
+        // ⚠️ 谨慎区（人工实现）：
+        //   UserCredentialStorePort.CredentialRecord credential =
+        //       credentialStoreProvider.getIfAvailable() 不可用 → ApiException(INTERNAL_ERROR,
+        //       "改密需要启用数据库与 form 模式")；
+        //   credentialStore.findByUserId(userId).orElseThrow(() -> ApiException(NOT_FOUND, "用户不存在"))；
+        //   require passwordEncoder.matches(currentPassword, credential.passwordHash())，
+        //       否则 ApiException(BAD_REQUEST, "当前密码错误")；
+        //   String hash = passwordEncoder.encode(newPassword)；
+        //   credentialStore.updatePassword(credential.id(), hash, Instant.now(),
+        //       Instant.now().plus(Duration.ofDays(expiryDays)), /*mustChange=*/false)；
+        //   ⚠️ 不清当前会话 refresh 家族（自助改密不强制重新登录；必须改密标志经 DB 重读自然清除）。
+        TodoSupport.notImplemented("AuthService#changePassword");
     }
 
     private AuthSessionVo toAuthSession(Authentication authentication) {

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { authApi } from "@/api-client/mock/auth";
 import { clearSession, getAccessToken, isAuthed } from "@/lib/auth";
+import { db } from "@/mocks/db";
 
 describe("mock auth", () => {
   beforeEach(() => {
@@ -32,5 +33,19 @@ describe("mock auth", () => {
   it("空账号或空密码登录被拒绝", async () => {
     await expect(authApi.login({ username: "", password: "x" })).rejects.toThrow("用户名或密码错误");
     await expect(authApi.login({ username: "a", password: "" })).rejects.toThrow("用户名或密码错误");
+  });
+
+  it("V0.5：修改密码后清除 mustChangePassword 标志", async () => {
+    await authApi.login({ username: "admin@ragkb.dev", password: "admin123" });
+    db.currentUser.mustChangePassword = true;
+    await authApi.changePassword({ currentPassword: "admin123", newPassword: "newpass123" });
+    expect(db.currentUser.mustChangePassword).toBe(false);
+  });
+
+  it("V0.5：新密码长度不足被拒绝", async () => {
+    await authApi.login({ username: "admin@ragkb.dev", password: "admin123" });
+    await expect(
+      authApi.changePassword({ currentPassword: "admin123", newPassword: "123" }),
+    ).rejects.toThrow("至少 6 位");
   });
 });
