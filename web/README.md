@@ -46,17 +46,30 @@ web/
 - 用户、组织、审计日志、审核队列、标签、收藏
 - API Key、Webhook、连接器
 
-### 如何消费 mock
+### 环境配置与 Mock 切换
 
-在 `api-client` 中按接口调用即可 —— 客户端会基于环境变量自动选择 transport:
+Next.js 根据命令自动加载环境文件：`pnpm dev` 使用 `.env.development`，生产构建使用
+`.env.production`，`.env.local` 可作为本机最高优先级覆盖。仓库提供不含密钥的模板：
 
 ```bash
-# 使用 mock(默认,无需后端)
-NEXT_PUBLIC_USE_MOCK=true pnpm dev
+# 本地开发（仓库已提供一份被 Git 忽略的 .env.development）
+cp .env.development.example .env.development
+pnpm dev
 
-# 连接真实后端
-NEXT_PUBLIC_USE_MOCK=false NEXT_PUBLIC_API_BASE_URL=http://localhost:8080 pnpm dev
+# 生产构建前复制并替换 example 域名
+cp .env.production.example .env.production
+pnpm build
 ```
+
+| 变量 | 用途 | 开发默认值 |
+| --- | --- | --- |
+| `NEXT_PUBLIC_USE_MOCK` | `true` 使用内置 Mock，`false` 调真实 HTTP API | `true` |
+| `NEXT_PUBLIC_API_BASE_URL` | 全局后端地址（不含 API 前缀） | `http://localhost:8080` |
+| `NEXT_PUBLIC_API_PREFIX` | 全局 API 前缀 | `/api/v1` |
+| `NEXT_PUBLIC_MINIO_BASE_URL` | 浏览器可访问的 MinIO/对象存储地址 | `http://localhost:9000` |
+
+配置统一从 `config/env.ts` 读取。修改 `NEXT_PUBLIC_*` 后需要重启开发服务；这些变量会进入
+浏览器 bundle，禁止填写密码、token、MinIO access key/secret key 等秘密信息。
 
 > 开发红线:组件中禁止直接 fetch;请求地址与协议细节只出现在 `api-client/` 目录。
 

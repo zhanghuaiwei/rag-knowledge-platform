@@ -5,7 +5,7 @@ import { Suspense, useEffect, useState } from "react";
 import { Alert, Button, Divider, Form, Input } from "antd";
 import { ApartmentOutlined, LockOutlined, UserOutlined } from "@ant-design/icons";
 
-import { api } from "@/api-client";
+import { api, getSsoAuthorizeUrl } from "@/api-client";
 import { isAuthed } from "@/lib/auth";
 
 /**
@@ -52,7 +52,7 @@ function LoginPageInner() {
 
   // 企业 SSO：跳后端 OIDC 授权端点（仅 oidc 模式开放；form 模式后端不提供该端点）
   const handleSsoLogin = () => {
-    window.location.href = "/api/v1/auth/authorize";
+    window.location.href = getSsoAuthorizeUrl();
   };
 
   return (

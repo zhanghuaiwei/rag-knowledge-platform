@@ -36,15 +36,25 @@ const detail = await api.getDocument(id);
 | --- | --- |
 | `NEXT_PUBLIC_USE_MOCK` 未设置或 `true` | 使用内置 mock 数据（无需后端） |
 | `NEXT_PUBLIC_USE_MOCK=false` | 使用真实 HTTP transport |
+| `NEXT_PUBLIC_API_BASE_URL` | 后端服务地址，不含 API 前缀 |
+| `NEXT_PUBLIC_API_PREFIX` | API 前缀，默认 `/api/v1` |
+| `NEXT_PUBLIC_MINIO_BASE_URL` | 浏览器可访问的 MinIO/对象存储地址 |
 
-真实后端连接（开发）：
+配置文件模板位于 `web/.env.example`、`web/.env.development.example` 和
+`web/.env.production.example`。本机开发配置复制为 `.env.development`：
 
 ```bash
-NEXT_PUBLIC_USE_MOCK=false NEXT_PUBLIC_API_BASE_URL=http://localhost:8080 pnpm dev
+cp .env.development.example .env.development
+# 编辑 .env.development，将 NEXT_PUBLIC_USE_MOCK 改为 false 即可连接真实后端
+pnpm dev
 ```
 
-`NEXT_PUBLIC_API_BASE_URL` 默认 `http://localhost:8080`，http transport 自动追加 `/api/v1`
-前缀，并携带会话 cookie（`withCredentials`）。后端需开放 CORS 且 `allowCredentials`。
+`config/env.ts` 是环境配置的唯一读取入口。HTTP transport、SSE 和 SSO 重定向复用同一个
+API URL；对象路径可通过 `buildMinioUrl(path)` 拼接为浏览器可访问地址。HTTP 请求携带会话
+cookie（`withCredentials`），后端需开放 CORS 且 `allowCredentials`。
+
+> `NEXT_PUBLIC_*` 会在构建时写入浏览器产物，只能放公开地址和开关。MinIO access key、
+> secret key、bucket 凭证等必须由后端持有；预签名 URL 仍以服务端返回值为准。
 
 ## 真实 HTTP transport 约定
 

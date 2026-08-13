@@ -6,4 +6,5 @@
  */
 export { api } from "@/api-client/client";
 export type { ApiClient } from "@/api-client/client";
+export { getObjectStorageUrl, getSsoAuthorizeUrl } from "@/api-client/urls";
 export * from "@/api-client/types";

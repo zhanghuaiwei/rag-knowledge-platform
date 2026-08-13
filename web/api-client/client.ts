@@ -10,10 +10,9 @@
 import { httpClient } from "@/api-client/http";
 import { mockClient } from "@/api-client/mock";
 import type { ApiClient } from "@/api-client/contracts";
-
-const useMock = process.env.NEXT_PUBLIC_USE_MOCK !== "false";
+import { publicEnv } from "@/config/env";
 
 /** 唯一客户端实例。 */
-export const api: ApiClient = useMock ? mockClient : httpClient;
+export const api: ApiClient = publicEnv.useMock ? mockClient : httpClient;
 
 export type { ApiClient } from "@/api-client/contracts";

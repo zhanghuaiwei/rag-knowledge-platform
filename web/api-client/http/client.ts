@@ -1,7 +1,7 @@
 /**
  * 真实 HTTP transport 的 axios 封装。
  *
- * - baseURL：`NEXT_PUBLIC_API_BASE_URL`（默认 http://localhost:8080），追加 `/api/v1` 前缀。
+ * - baseURL：由 `config/env.ts` 统一读取 API 地址和前缀。
  * - 请求拦截器注入 `Authorization: Bearer <accessToken>`（token 存于内存，见 lib/auth）。
  * - 响应拦截器：401 且非认证端点 → 单飞刷新（POST /auth/refresh，靠 HttpOnly cookie）→ 重试一次；
  *   刷新失败则清会话并跳 /login。`withCredentials: true` 使 refresh 请求携带 cookie。
@@ -12,10 +12,8 @@
 import axios, { type AxiosError, type AxiosRequestConfig } from "axios";
 
 import { ApiError } from "@/api-client/http/errors";
+import { buildApiUrl, publicEnv } from "@/config/env";
 import { clearSession, getAccessToken, setAuth } from "@/lib/auth";
-
-const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8080").replace(/\/+$/, "");
-const API_PREFIX = "/api/v1";
 
 /** 后端统一响应信封。 */
 interface ApiEnvelope<T> {
@@ -23,11 +21,6 @@ interface ApiEnvelope<T> {
   message: string;
   data: T;
   requestId?: string;
-}
-
-/** 拼出后端完整请求地址（SSE 等 fetch 场景使用）。 */
-export function buildApiUrl(path: string): string {
-  return `${API_BASE_URL}${API_PREFIX}${path}`;
 }
 
 /** 数组查询参数逗号拼接（对齐 OpenAPI explode:false / Spring List 解析）。 */
@@ -45,12 +38,14 @@ function serializeParams(params: Record<string, unknown>): string {
 }
 
 export const http = axios.create({
-  baseURL: `${API_BASE_URL}${API_PREFIX}`,
+  baseURL: publicEnv.apiUrl,
   timeout: 15_000,
   withCredentials: true,
   headers: { "Content-Type": "application/json" },
   paramsSerializer: { serialize: serializeParams },
 });
+
+export { buildApiUrl };
 
 /** 将任意错误归一化为 ApiError（供页面 catch 统一展示）。 */
 function toApiError(error: unknown): ApiError {
