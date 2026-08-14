@@ -1,5 +1,7 @@
 package com.ragkb.service.modules.knowledge.service.impl;
 
+import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ragkb.service.modules.knowledge.persistence.entity.Kb;
 import com.ragkb.service.modules.knowledge.persistence.mapper.KbMapper;
 import com.ragkb.service.util.TodoSupport;
@@ -30,7 +32,32 @@ public class KbServiceImpl implements KbService {
 
     @Override
     public PageData<KbVo> listKbs(int page, int size) {
-        return TodoSupport.notImplemented("KbService#listKbs");
+        // 分页返回kbs（selectPage 分页：配了 PaginationInnerInterceptor 会走 SQL 分页）
+        IPage<Kb> kbPage = kbMapper.selectPage(new Page<>(page, size), null);
+        List<KbVo> items = kbPage.getRecords().stream()
+                .map(KbServiceImpl::toVo)
+                .toList();
+        return PageData.of(items, kbPage.getTotal(), page, size);
+    }
+
+    /** 实体 → VO 映射（桩：role/计数/索引配置名等跨表字段暂给默认值，业务实现时补齐）。 */
+    private static KbVo toVo(Kb kb) {
+        return new KbVo(
+                kb.getId(),
+                kb.getName(),
+                kb.getDescription(),
+                kb.getVisibility(),
+                kb.getStatus(),
+                null,                       // role：需当前用户在该知识库的角色（桩）
+                0L,                         // documentCount（桩）
+                0L,                         // chunkCount（桩）
+                kb.getDataRegion(),
+                null,                       // indexProfileName：需查 index_profile（桩）
+                Boolean.TRUE.equals(kb.getRequiresReview()),
+                Boolean.TRUE.equals(kb.getOcrEnabled()),
+                kb.getCreateTime(),
+                kb.getUpdateTime(),
+                List.of());                 // members（桩）
     }
 
     @Override
