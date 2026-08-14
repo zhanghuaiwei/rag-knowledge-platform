@@ -23,7 +23,7 @@ public interface KbService {
 
     KbVo updateKb(long kbId, KbUpdateDto request, String idempotencyKey);
 
-    KbVo createKb(KbCreateDto request, String idempotencyKey);
+    void createKb(KbCreateDto request, String idempotencyKey);
 
     /** 克隆为异步任务；返回任务，前端轮询进度后按 resourceId 获取新库。 */
     Task cloneKb(long kbId, CloneKbDto request, String idempotencyKey);

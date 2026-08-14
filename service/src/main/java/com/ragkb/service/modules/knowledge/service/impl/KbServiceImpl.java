@@ -1,5 +1,7 @@
 package com.ragkb.service.modules.knowledge.service.impl;
 
+import com.ragkb.service.modules.knowledge.persistence.entity.Kb;
+import com.ragkb.service.modules.knowledge.persistence.mapper.KbMapper;
 import com.ragkb.service.util.TodoSupport;
 import com.ragkb.service.common.api.PageData;
 import com.ragkb.service.common.model.Task;
@@ -11,6 +13,8 @@ import com.ragkb.service.modules.knowledge.vo.KbMemberVo;
 import com.ragkb.service.modules.knowledge.dto.KbMemberDto;
 import com.ragkb.service.modules.knowledge.dto.KbUpdateDto;
 import com.ragkb.service.modules.knowledge.service.KbService;
+import org.springframework.beans.BeanUtils;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -20,6 +24,9 @@ import java.util.List;
  */
 @Service
 public class KbServiceImpl implements KbService {
+
+    @Autowired
+    private KbMapper kbMapper;
 
     @Override
     public PageData<KbVo> listKbs(int page, int size) {
@@ -37,8 +44,12 @@ public class KbServiceImpl implements KbService {
     }
 
     @Override
-    public KbVo createKb(KbCreateDto request, String idempotencyKey) {
-        return TodoSupport.notImplemented("KbService#createKb");
+    public void createKb(KbCreateDto request, String idempotencyKey) {
+
+        // 给kb表里新增知识库数据
+        Kb kb = new Kb();
+        BeanUtils.copyProperties(request, kb);
+        kbMapper.insert(kb);
     }
 
     @Override
