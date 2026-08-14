@@ -6,7 +6,7 @@ spring:
   # 凭证一律走环境变量，禁止硬编码。
   datasource:
     url: ${RAGKB_DB_URL:jdbc:postgresql://localhost:5432/ragkb}
-    username: ${RAGKB_DB_USERNAME:ragkb_app}
+    username: ${RAGKB_DB_USERNAME:postgres}
     password: ${RAGKB_DB_PASSWORD:}
     driver-class-name: org.postgresql.Driver
   # Redis：refresh token 族 + access token 黑名单（JWT 认证）。凭证来自环境变量；
@@ -56,7 +56,7 @@ management:
 # rag-engine（Python）对接配置（06-架构方案）；实际对接由人工在
 # modules/rag/adapter/RagEngineHttpClient 中实现。
 rag-engine:
-  base-url: ${RAG_ENGINE_BASE_URL:http://rag-engine.ragkb.svc:8000}
+  base-url: ${RAG_ENGINE_BASE_URL:http://localhost:8000}
   timeout-ms: ${RAG_ENGINE_TIMEOUT_MS:10000}
 
 # CORS：前端直连来源（逗号分隔），携带会话 cookie 需要 allowCredentials。
@@ -65,8 +65,9 @@ ragkb:
     allowed-origins: ${RAGKB_CORS_ALLOWED_ORIGINS:http://localhost:3000}
   # 数据访问开关：false（默认）脚手架阶段无数据库也能启动；
   # 实现数据层时置 RAGKB_DB_ENABLED=true 并配置上方 spring.datasource 凭证。
+  # 表单登录是否需要数据库
   db:
-    enabled: ${RAGKB_DB_ENABLED:false}
+    enabled: ${RAGKB_DB_ENABLED:true}
   # 认证模式：form（账号密码，本地账号体系）| oidc（企业 IdP）
   #  form：ragkb.db.enabled=true 时登录判定来自 user_credential/sys_user（见 V0.4 迁移），
   #        无数据库时降级为下方 dev 内存账号（仅脚手架兜底）。

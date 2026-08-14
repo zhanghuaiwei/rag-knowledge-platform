@@ -7,7 +7,9 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -27,6 +29,9 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
 import org.springframework.security.web.context.SecurityContextRepository;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+import org.springframework.web.filter.CorsFilter;
 
 /**
  * 认证安全配置——按环境变量开关切换登录方式：
@@ -91,9 +96,20 @@ public class SecurityConfig {
             ObjectProvider<ApiKeyAuthenticationFilter> apiKeyFilterProvider,
             ObjectProvider<CredentialPolicyGateFilter> credentialPolicyGateProvider) throws Exception {
         http
+                // 对所有请求开启CORS支持
+                // 目的是让 CORS 处理先于认证逻辑执行：预检请求（OPTIONS）到达时直接返回 CORS 响应头，不会被后续的认证/鉴权拦截。
+
+                // Customizer.withDefaults() 会自动找到容器中的 CorsConfigurationSource Bean 并应用,
+                // Spring Boot 会把 WebMvcConfigurer 里注册的 CorsRegistry 自动转换成 CorsConfigurationSource Bean
+                .cors(Customizer.withDefaults())  // 避免预检请求被认证拦截
                 .csrf(csrf -> csrf.disable()) // 脚手架说明见类注释
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
+                        // 把这个注释掉  session 又不跨域了
+                        // Authorization: Bearer xxx，这触发了预检机制。
+                        // 预检请求 OPTIONS 不带 token，被 Spring Security 当作未认证请求拦截返回 401，浏览器判定跨域失败。
+                        // 放行 OPTIONS 请求后，预检能正常返回 CORS 头，浏览器才允许后续带 token 的真实请求通过。
+                        //.requestMatchers(HttpMethod.OPTIONS, "/api/**").permitAll()  // 放行预检请求 解决auth/session 跨越的问题
                         .requestMatchers(
                                 "/api/v1/auth/login", "/api/v1/auth/refresh", "/api/v1/auth/logout",
                                 "/api/v1/ping", "/actuator/**", "/error")
@@ -111,6 +127,7 @@ public class SecurityConfig {
                 http.addFilterAfter(gateFilter, JwtAuthenticationFilter.class));
         return http.build();
     }
+
 
     /** 脚手架无数据库兜底用的内存用户（db.enabled=false 且 mode=form 时生效；启用 DB 后由
      *  {@code JdbcUserDetailsService} 从 user_credential 接管，登录判定落库）。 */

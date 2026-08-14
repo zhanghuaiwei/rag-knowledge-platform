@@ -39,12 +39,12 @@ public class GlobalExceptionHandler {
                 .body(ApiResponse.error(ErrorCode.BAD_REQUEST.getCode(), message));
     }
 
-    /** 账号密码登录失败：用户名或密码错误 → 401（不泄漏具体哪一项错）。 */
+    /** 账号密码登录失败：用户名或密码错误 → Code is 500 */
     @ExceptionHandler(org.springframework.security.core.AuthenticationException.class)
     public ResponseEntity<ApiResponse<Void>> handleAuthentication(AuthenticationException ex) {
         log.info("authentication failed: {}", ex.getMessage());
-        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                .body(ApiResponse.error(ErrorCode.UNAUTHORIZED.getCode(), "用户名或密码错误"));
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(ApiResponse.error(ErrorCode.UNAUTHORIZED.getCode(), ex.getMessage()));
     }
 
     /** 已认证但无权限（如方法级 @PreAuthorize 拒绝）→ 403。 */

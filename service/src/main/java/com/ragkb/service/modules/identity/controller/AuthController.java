@@ -20,13 +20,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
-import org.springframework.web.bind.annotation.CookieValue;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestHeader;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 import java.net.URI;
 import java.time.Duration;
@@ -43,6 +37,7 @@ import java.time.Duration;
  * </ul>
  */
 @RestController
+@RequestMapping("/api/v1/auth")
 public class AuthController {
 
     private final AuthService authService;
@@ -59,34 +54,42 @@ public class AuthController {
     }
 
     /** 登录入口：form 模式重定向登录页；oidc 模式重定向 IdP。 */
-    @GetMapping("/api/v1/auth/authorize")
+    @GetMapping("authorize")
     public ResponseEntity<Void> authorize(@RequestParam(required = false) String returnTo) {
         String url = authService.buildAuthorizeUrl(returnTo);
         return ResponseEntity.status(HttpStatus.FOUND).location(URI.create(url)).build();
     }
 
     /** OIDC callback：由 Spring Security oauth2Login 处理，此处回跳首页。 */
-    @GetMapping("/api/v1/auth/callback")
+    @GetMapping("callback")
     public ResponseEntity<Void> callback(@RequestParam String code, @RequestParam String state) {
         authService.handleCallback(code, state);
         return ResponseEntity.status(HttpStatus.FOUND).location(URI.create("/")).build();
     }
 
     /** 账号密码登录（仅 form 模式开放）：签发 access token（响应体）+ refresh token（HttpOnly cookie）。 */
-    @PostMapping("/api/v1/auth/login")
+    @PostMapping("login")
     public ApiResponse<TokenResponseVo> login(
             @Valid @RequestBody LoginDto request,
             HttpServletResponse servletResponse) {
+        // 获取认证对象
+        // 进loadUserByUsername
         Authentication authentication = authenticationManager.authenticate(
                 UsernamePasswordAuthenticationToken.unauthenticated(
                         request.username(), request.password()));
+
+        // 根据认证对象获取认证结果
         AuthResult result = authService.login(authentication);
+
+        // refresh存入cookie
         writeRefreshCookie(servletResponse, result.refreshToken(), result.refreshCookieMaxAge());
+
+
         return ApiResponse.ok(result.response());
     }
 
     /** 刷新：读取 HttpOnly refresh cookie，轮换并签发新 access token；复用检测失败 401。 */
-    @PostMapping("/api/v1/auth/refresh")
+    @PostMapping("refresh")
     public ApiResponse<TokenResponseVo> refresh(
             @CookieValue(name = "ragkb_refresh", required = false) String refreshToken,
             HttpServletResponse servletResponse) {
@@ -99,7 +102,7 @@ public class AuthController {
     }
 
     /** 登出（幂等）：黑名单 access jti + 吊销 refresh 家族 + 清除 refresh cookie。 */
-    @PostMapping("/api/v1/auth/logout")
+    @PostMapping("logout")
     public ResponseEntity<Void> logout(
             @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization,
             @CookieValue(name = "ragkb_refresh", required = false) String refreshToken,
@@ -111,7 +114,7 @@ public class AuthController {
         return ResponseEntity.noContent().build();
     }
 
-    @GetMapping("/api/v1/auth/session")
+    @GetMapping("session")
     public ApiResponse<AuthSessionVo> session() {
         return ApiResponse.ok(authService.session());
     }
@@ -120,7 +123,7 @@ public class AuthController {
      * 自助修改当前登录用户密码（Bearer JWT）：核验当前密码后更新 BCrypt hash，
      * 清除 {@code mustChangePassword}；当前会话保持。
      */
-    @PostMapping("/api/v1/auth/change-password")
+    @PostMapping("change-password")
     public ResponseEntity<Void> changePassword(@Valid @RequestBody ChangePasswordRequest request) {
         long userId = currentUserId();
         authService.changePassword(userId, request.currentPassword(), request.newPassword());
@@ -141,7 +144,7 @@ public class AuthController {
      * 切换当前激活租户（JWT 模式）：服务端校验成员关系后重签 access + refresh，
      * 返回新 TokenResponse（含新租户上下文），refresh 重新写 HttpOnly cookie。
      */
-    @PostMapping("/api/v1/auth/tenant/switch")
+    @PostMapping("tenant/switch")
     public ApiResponse<TokenResponseVo> switchTenant(
             @Valid @RequestBody SwitchTenantDto request,
             HttpServletResponse servletResponse) {
@@ -157,6 +160,8 @@ public class AuthController {
                 .httpOnly(true)
                 .secure(refreshCookieSecure)
                 .sameSite("Lax")
+                // .sameSite("None")
+                // .secure(false) // 关闭https的校验
                 .path("/api/v1/auth")
                 .maxAge(maxAge)
                 .build();

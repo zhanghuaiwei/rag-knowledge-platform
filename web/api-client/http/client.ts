@@ -40,7 +40,7 @@ function serializeParams(params: Record<string, unknown>): string {
 export const http = axios.create({
   baseURL: publicEnv.apiUrl,
   timeout: 150000,
-  withCredentials: true,
+  withCredentials: true, // 前端请求默认不携带 Cookie
   headers: { "Content-Type": "application/json" },
   paramsSerializer: { serialize: serializeParams },
 });
