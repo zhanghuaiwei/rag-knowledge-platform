@@ -83,6 +83,7 @@ export default function NewKbPage() {
         modelPolicy: values.modelPolicy,
         requiresReview: values.requiresReview,
         ocrEnabled: values.ocrEnabled,
+        tenant_id: "1",
       });
       toast("success", `知识库「${values.name}」已创建`);
       router.push("/kbs");

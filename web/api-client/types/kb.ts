@@ -47,6 +47,7 @@ export interface CreateKbInput {
   modelPolicy?: string;
   requiresReview?: boolean;
   ocrEnabled?: boolean;
+  tenant_id?: string;
 }
 
 export interface AddKbMemberInput {
