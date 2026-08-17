@@ -1,7 +1,9 @@
 package com.ragkb.service.modules.identity.service.impl;
 
 import com.ragkb.service.common.exception.ApiException;
+import com.ragkb.service.common.exception.ErrorCode;
 import com.ragkb.service.config.JwtTokenProperties;
+import com.ragkb.service.config.LocalAuthProperties;
 import com.ragkb.service.modules.access.service.PermissionCatalog;
 import com.ragkb.service.modules.identity.adapter.ApiKeyCrypto;
 import com.ragkb.service.modules.identity.dto.ApiKeyCreateDto;
@@ -36,7 +38,9 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
@@ -57,10 +61,14 @@ class AuthServiceImplTest {
     @Mock private ObjectProvider<ApiKeyStorePort> apiKeyStoreProvider;
     @Mock private ObjectProvider<UserCredentialStorePort> credentialStoreProvider;
     @Mock private ObjectProvider<org.springframework.security.crypto.password.PasswordEncoder> passwordEncoderProvider;
+    @Mock private UserCredentialStorePort credentialStore;
+    @Mock private org.springframework.security.crypto.password.PasswordEncoder passwordEncoder;
 
     private final JwtTokenProperties properties = new JwtTokenProperties(
             "test-secret-0123456789abcdef0123456789abcdef", "ragkb",
             Duration.ofMinutes(15), REFRESH_TTL, 2592000);
+    /** 本地凭据策略：启用 180 天密码过期（供 changePassword 过期时间断言）。 */
+    private final LocalAuthProperties localAuthProperties = new LocalAuthProperties(5, 15, 180);
     private final PermissionCatalog catalog = new PermissionCatalog();
     private final ApiKeyCrypto apiKeyCrypto = new ApiKeyCrypto("test-pepper");
 
@@ -68,7 +76,7 @@ class AuthServiceImplTest {
 
     @BeforeEach
     void setUp() {
-        service = new AuthServiceImpl("form", properties, tokenService, blacklistPort,
+        service = new AuthServiceImpl("form", properties, localAuthProperties, tokenService, blacklistPort,
                 refreshStore, identityDirectory, catalog, apiKeyCrypto, apiKeyStoreProvider,
                 credentialStoreProvider, passwordEncoderProvider);
         // 部分用例不调用 refreshTtl，lenient 避免 StrictStubs 误报
@@ -254,5 +262,65 @@ class AuthServiceImplTest {
                 () -> service.createApiKey(new ApiKeyCreateDto("my-key", List.of("web"), null, null), null));
         assertNotNull(ex.getMessage());
         assertTrue(ex.getMessage().contains("数据库"));
+    }
+
+    // ---------- changePassword ----------
+
+    /** 凭据记录样本（id=7，旧哈希 $2y$10$old，无强制改密标志）。 */
+    private UserCredentialStorePort.CredentialRecord credential() {
+        return new UserCredentialStorePort.CredentialRecord(
+                7L, 1L, "admin", "$2y$10$old", "ACTIVE", 0, null,
+                Instant.parse("2026-01-01T00:00:00Z"), null, false);
+    }
+
+    @Test
+    void changePasswordVerifiesCurrentAndClearsMustChangeFlag() {
+        // form+db 模式装配齐备：凭据存储与 BCrypt 编码器均可用
+        when(credentialStoreProvider.getIfAvailable()).thenReturn(credentialStore);
+        when(passwordEncoderProvider.getIfAvailable()).thenReturn(passwordEncoder);
+        when(credentialStore.findByUserId(1L)).thenReturn(Optional.of(credential()));
+        when(passwordEncoder.matches("old-pass", "$2y$10$old")).thenReturn(true);
+        when(passwordEncoder.encode("newpass1x")).thenReturn("$2y$10$new");
+
+        service.changePassword(1L, "old-pass", "newpass1x");
+
+        // 自助改密：写新哈希、must_change_password=false（门禁自然解除）、过期时间按策略重算
+        verify(credentialStore).updatePassword(eq(7L), eq("$2y$10$new"),
+                any(Instant.class), any(Instant.class), eq(false));
+    }
+
+    @Test
+    void changePasswordRejectsWrongCurrentPassword() {
+        when(credentialStoreProvider.getIfAvailable()).thenReturn(credentialStore);
+        when(passwordEncoderProvider.getIfAvailable()).thenReturn(passwordEncoder);
+        when(credentialStore.findByUserId(1L)).thenReturn(Optional.of(credential()));
+        when(passwordEncoder.matches("wrong", "$2y$10$old")).thenReturn(false);
+
+        ApiException ex = assertThrows(ApiException.class,
+                () -> service.changePassword(1L, "wrong", "newpass1x"));
+        assertEquals(ErrorCode.BAD_REQUEST, ex.getErrorCode());
+        verify(credentialStore, never()).updatePassword(anyLong(), anyString(), any(), any(), anyBoolean());
+    }
+
+    @Test
+    void changePasswordRejectsWeakNewPassword() {
+        when(credentialStoreProvider.getIfAvailable()).thenReturn(credentialStore);
+        when(passwordEncoderProvider.getIfAvailable()).thenReturn(passwordEncoder);
+        when(credentialStore.findByUserId(1L)).thenReturn(Optional.of(credential()));
+        when(passwordEncoder.matches("old-pass", "$2y$10$old")).thenReturn(true);
+
+        // 7 位且无数字：不满足「>=8 位且含字母数字」统一策略
+        ApiException ex = assertThrows(ApiException.class,
+                () -> service.changePassword(1L, "old-pass", "weakpass"));
+        assertEquals(ErrorCode.BAD_REQUEST, ex.getErrorCode());
+        verify(credentialStore, never()).updatePassword(anyLong(), anyString(), any(), any(), anyBoolean());
+    }
+
+    @Test
+    void changePasswordWithoutCredentialStoreThrowsClearError() {
+        // oidc / 无 DB 部署：凭据存储未装配（getIfAvailable 默认 null）
+        ApiException ex = assertThrows(ApiException.class,
+                () -> service.changePassword(1L, "old-pass", "newpass1x"));
+        assertEquals(ErrorCode.INTERNAL_ERROR, ex.getErrorCode());
     }
 }

@@ -8,6 +8,7 @@ import com.ragkb.service.modules.analytics.vo.TopDocumentPointVo;
 import com.ragkb.service.modules.analytics.vo.UsagePointVo;
 import com.ragkb.service.modules.analytics.service.AnalyticsService;
 import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -23,8 +24,11 @@ import java.util.List;
  * <p>OpenAPI 草案的 usage/costs 为聚合视图，前端需要按日明细渲染图表，
  * 故返回明细点（top-documents / dau 为产品契约所需新增端点）。
  */
+// 装配条件：实现依赖数据库聚合（ragkb.db.enabled=true）；scaffold 模式下端点整体下线，
+// 与 conversation/identity 模块的条件装配约定一致（避免无数据库时上下文装配失败）。
 @RestController
 @RequestMapping("/api/v1/analytics")
+@ConditionalOnProperty(name = "ragkb.db.enabled", havingValue = "true")
 public class AnalyticsController {
 
     private final AnalyticsService analyticsService;

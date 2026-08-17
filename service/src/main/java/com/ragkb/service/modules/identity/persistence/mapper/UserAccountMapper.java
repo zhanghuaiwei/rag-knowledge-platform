@@ -54,4 +54,23 @@ public interface UserAccountMapper {
 
     /** 校验组织在当前租户存在且 ACTIVE（clear-and-set 的合法性检查）。 */
     long countOrgInTenant(@Param("tenantId") long tenantId, @Param("orgId") long orgId);
+
+    /**
+     * 统计当前租户内「成员状态 ACTIVE 且持有 TENANT_ADMIN 角色」的管理员人数
+     * （JOIN tenant_member 过滤 SUSPENDED/逻辑删除成员）。供 setRoles/removeFromTenant
+     * 的"最后一名管理员保护"守卫使用：结果 &lt;= 1 时禁止再移除管理员的最后一份角色。
+     */
+    long countActiveTenantAdmins(@Param("tenantId") long tenantId);
+
+    /**
+     * 写安全审计事件（SQL 直连 audit_log，与 sys_org 直连同理：audit_log 实体属 admin
+     * 模块持久化，identity 模块不跨 Java 模块依赖）。actor=当前操作者（USER），
+     * 仅记录动作与对象 id，绝不落密码明文等敏感值。
+     *
+     * @return 受影响行数（正常恒为 1，供测试断言）
+     */
+    int insertAuditLog(@Param("tenantId") long tenantId,
+                       @Param("actorId") long actorId,
+                       @Param("action") String action,
+                       @Param("resourceId") String resourceId);
 }

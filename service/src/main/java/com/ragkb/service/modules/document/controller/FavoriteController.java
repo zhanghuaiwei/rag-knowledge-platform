@@ -6,6 +6,7 @@ import com.ragkb.service.modules.document.vo.FavoriteItemVo;
 import com.ragkb.service.modules.document.dto.FavoriteDto;
 import com.ragkb.service.modules.document.service.DocumentService;
 import jakarta.validation.Valid;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -15,8 +16,10 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+// 装配条件：收藏依赖数据库持久化（ragkb.db.enabled=true），scaffold 模式下端点整体下线。
 @RestController
 @RequestMapping("/api/v1/favorites")
+@ConditionalOnProperty(name = "ragkb.db.enabled", havingValue = "true")
 public class FavoriteController {
 
     private final DocumentService documentService;

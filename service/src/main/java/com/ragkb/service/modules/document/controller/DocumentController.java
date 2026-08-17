@@ -13,6 +13,7 @@ import com.ragkb.service.modules.document.dto.RollbackVersionDto;
 import com.ragkb.service.modules.document.dto.UpdateDocumentMetadataDto;
 import com.ragkb.service.modules.document.service.DocumentService;
 import jakarta.validation.Valid;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -32,8 +33,11 @@ import org.springframework.web.bind.annotation.RestController;
 import java.io.InputStream;
 import java.util.List;
 
+// 装配条件：文档域依赖数据库持久化（ragkb.db.enabled=true），scaffold 模式下端点整体下线
+// （与 conversation/identity 模块的条件装配约定一致，避免无数据库时上下文装配失败）。
 @RestController
 @RequestMapping("/api/v1")
+@ConditionalOnProperty(name = "ragkb.db.enabled", havingValue = "true")
 public class DocumentController {
 
     private final DocumentService documentService;

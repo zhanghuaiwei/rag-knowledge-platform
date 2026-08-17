@@ -3,6 +3,7 @@ package com.ragkb.service.modules.identity.service.impl;
 import com.ragkb.service.common.exception.ApiException;
 import com.ragkb.service.common.exception.ErrorCode;
 import com.ragkb.service.config.JwtTokenProperties;
+import com.ragkb.service.config.LocalAuthProperties;
 import com.ragkb.service.modules.access.service.PermissionCatalog;
 import com.ragkb.service.modules.identity.adapter.ApiKeyCrypto;
 import com.ragkb.service.modules.identity.dto.ApiKeyCreateDto;
@@ -13,7 +14,6 @@ import com.ragkb.service.modules.identity.port.TokenBlacklistPort;
 import com.ragkb.service.modules.identity.port.UserCredentialStorePort;
 import com.ragkb.service.modules.identity.service.AuthService;
 import com.ragkb.service.modules.identity.service.TokenService;
-import com.ragkb.service.util.TodoSupport;
 import com.ragkb.service.modules.identity.vo.ApiKeyCreatedVo;
 import com.ragkb.service.modules.identity.vo.ApiKeyVo;
 import com.ragkb.service.modules.identity.vo.AuthSessionVo;
@@ -53,6 +53,8 @@ public class AuthServiceImpl implements AuthService {
 
     private final String authMode;
     private final JwtTokenProperties jwtProperties;
+    /** 本地账号凭据策略配置（改密后按 passwordExpiryDays 重算过期时间；<=0 表示不过期）。 */
+    private final LocalAuthProperties localAuthProperties;
     private final TokenService tokenService;
     private final TokenBlacklistPort blacklistPort;
     private final RefreshTokenStorePort refreshStore;
@@ -69,6 +71,7 @@ public class AuthServiceImpl implements AuthService {
     public AuthServiceImpl(
             @Value("${ragkb.auth.mode:form}") String authMode,
             JwtTokenProperties jwtProperties,
+            LocalAuthProperties localAuthProperties,
             TokenService tokenService,
             TokenBlacklistPort blacklistPort,
             RefreshTokenStorePort refreshStore,
@@ -80,6 +83,7 @@ public class AuthServiceImpl implements AuthService {
             ObjectProvider<PasswordEncoder> passwordEncoderProvider) {
         this.authMode = authMode;
         this.jwtProperties = jwtProperties;
+        this.localAuthProperties = localAuthProperties;
         this.tokenService = tokenService;
         this.blacklistPort = blacklistPort;
         this.refreshStore = refreshStore;
@@ -319,18 +323,36 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     public void changePassword(long userId, String currentPassword, String newPassword) {
-        // ⚠️ 谨慎区（人工实现）：
-        //   UserCredentialStorePort.CredentialRecord credential =
-        //       credentialStoreProvider.getIfAvailable() 不可用 → ApiException(INTERNAL_ERROR,
-        //       "改密需要启用数据库与 form 模式")；
-        //   credentialStore.findByUserId(userId).orElseThrow(() -> ApiException(NOT_FOUND, "用户不存在"))；
-        //   require passwordEncoder.matches(currentPassword, credential.passwordHash())，
-        //       否则 ApiException(BAD_REQUEST, "当前密码错误")；
-        //   String hash = passwordEncoder.encode(newPassword)；
-        //   credentialStore.updatePassword(credential.id(), hash, Instant.now(),
-        //       Instant.now().plus(Duration.ofDays(expiryDays)), /*mustChange=*/false)；
-        //   ⚠️ 不清当前会话 refresh 家族（自助改密不强制重新登录；必须改密标志经 DB 重读自然清除）。
-        TodoSupport.notImplemented("AuthService#changePassword");
+        // 自助改密仅 form+db 模式可用：无本地凭据存储（oidc 部署或未启用 DB）直接明确报错
+        UserCredentialStorePort credentialStore = credentialStoreProvider.getIfAvailable();
+        if (credentialStore == null) {
+            throw new ApiException(ErrorCode.INTERNAL_ERROR, "改密需要启用数据库与 form 模式");
+        }
+        // BCrypt 编码器同样依赖 form 模式装配，缺失即功能不可用（防御性，正常容器必注入）
+        PasswordEncoder passwordEncoder = passwordEncoderProvider.getIfAvailable();
+        if (passwordEncoder == null) {
+            throw new ApiException(ErrorCode.INTERNAL_ERROR, "改密需要启用数据库与 form 模式");
+        }
+        // 按全局用户 id 重读凭据（form 模式下一人至多一条本地凭据）
+        UserCredentialStorePort.CredentialRecord credential = credentialStore.findByUserId(userId)
+                .orElseThrow(() -> new ApiException(ErrorCode.NOT_FOUND, "用户不存在"));
+        // 核验当前密码：与库中 BCrypt 哈希比对，失败即拒绝（防会话被窃后改密接管账号）
+        if (!passwordEncoder.matches(currentPassword, credential.passwordHash())) {
+            throw new ApiException(ErrorCode.BAD_REQUEST, "当前密码错误");
+        }
+        // 新密码统一强度策略（>=8 位且含字母数字，与建号/重置同一份 PasswordPolicy）
+        PasswordPolicy.requireStrong(newPassword);
+        // 改密时间起点 = now；过期时间按策略配置重算（<=0 表示未启用过期，写 NULL）
+        Instant now = Instant.now();
+        Instant passwordExpiresAt = localAuthProperties.passwordExpiryDays() > 0
+                ? now.plus(Duration.ofDays(localAuthProperties.passwordExpiryDays()))
+                : null;
+        // 自助改密成功：must_change_password 置 false（经 CredentialPolicyGateFilter 每请求
+        // 重读 DB 自然解除门禁）；同时清失败计数/锁定，凭据恢复健康态。
+        // ⚠️ 刻意不清当前会话 refresh 家族：自助改密不强制重新登录（既定契约，
+        // 旧 access 最长 15 分钟自然过期；按用户吊销全量会话需引入 per-user 会话版本，列为后续演进）。
+        credentialStore.updatePassword(credential.id(), passwordEncoder.encode(newPassword),
+                now, passwordExpiresAt, false);
     }
 
     private AuthSessionVo toAuthSession(Authentication authentication) {

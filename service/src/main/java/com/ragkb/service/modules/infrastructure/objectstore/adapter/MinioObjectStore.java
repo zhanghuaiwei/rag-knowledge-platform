@@ -1,9 +1,9 @@
-package com.ragkb.service.modules.infrastructure.objectstore;
+package com.ragkb.service.modules.infrastructure.objectstore.adapter;
 
 import com.ragkb.service.common.exception.ApiException;
 import com.ragkb.service.common.exception.ErrorCode;
 import com.ragkb.service.common.model.TenantId;
-import com.ragkb.service.common.storage.ObjectStorePort;
+import com.ragkb.service.modules.infrastructure.objectstore.port.ObjectStorePort;
 import io.minio.BucketExistsArgs;
 import io.minio.GetObjectArgs;
 import io.minio.MakeBucketArgs;
