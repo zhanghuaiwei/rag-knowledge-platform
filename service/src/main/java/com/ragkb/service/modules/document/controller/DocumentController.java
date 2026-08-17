@@ -32,7 +32,8 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
-
+import org.springframework.http.MediaType;
+import java.io.InputStream;
 import java.util.List;
 
 /**
@@ -83,6 +84,35 @@ public class DocumentController {
     @GetMapping("/api/v1/documents/{documentId}/versions")
     public ApiResponse<List<DocumentVersionVo>> listDocumentVersions(@PathVariable long documentId) {
         return ApiResponse.ok(documentService.listDocumentVersions(documentId));
+    }
+
+    /**
+     * 在线预览：返回文档当前版本的原始字节流（需 VIEW_CONTENT 权限）。
+     * PDF/图片等浏览器可直接渲染的格式走 inline；其余由前端按 Content-Type 处理。
+     */
+    @GetMapping("/api/v1/documents/{documentId}/preview")
+    public ResponseEntity<org.springframework.core.io.InputStreamResource> previewDocument(
+            @PathVariable long documentId) {
+        InputStream stream = documentService.previewDocument(documentId);
+        return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_OCTET_STREAM)
+                .header("Content-Disposition", "inline")
+                .body(new org.springframework.core.io.InputStreamResource(stream));
+    }
+
+    /**
+     * 下载原文：返回指定版本（versionId=null 时取当前版本）的原始字节流
+     * （需 DOWNLOAD_ORIGINAL 权限），Content-Disposition=attachment 触发浏览器下载。
+     */
+    @GetMapping("/api/v1/documents/{documentId}/download")
+    public ResponseEntity<org.springframework.core.io.InputStreamResource> downloadDocument(
+            @PathVariable long documentId,
+            @RequestParam(required = false) Long versionId) {
+        InputStream stream = documentService.downloadDocument(documentId, versionId);
+        return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_OCTET_STREAM)
+                .header("Content-Disposition", "attachment")
+                .body(new org.springframework.core.io.InputStreamResource(stream));
     }
 
     /** 更新文档元数据（产品契约所需；OpenAPI 草案仅定义 schema 值更新，此处为文档基础字段）。 */

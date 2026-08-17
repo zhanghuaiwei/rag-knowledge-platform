@@ -59,8 +59,19 @@ rag-engine:
   base-url: ${RAG_ENGINE_BASE_URL:http://localhost:8000}
   timeout-ms: ${RAG_ENGINE_TIMEOUT_MS:10000}
 
+# 对象存储（原文不可变 ADR-6）：local = 本地文件系统（开发兜底）| minio = MinIO/S3
+#   * minio 模式凭证与 deploy/compose 的 MINIO_ROOT_USER/PASSWORD 对齐；
+#   * 切换 storage.type 即换适配器，领域层（ObjectStorePort）与 DocumentService 无需改动。
 # CORS：前端直连来源（逗号分隔），携带会话 cookie 需要 allowCredentials。
 ragkb:
+  storage:
+    type: ${RAGKB_STORAGE_TYPE:minio}
+    local-dir: ${RAGKB_STORAGE_LOCAL_DIR:./data/objects}
+    minio:
+      endpoint: ${RAGKB_STORAGE_MINIO_ENDPOINT:http://localhost:9000}
+      access-key: ${MINIO_ROOT_USER:minioadmin}
+      secret-key: ${MINIO_ROOT_PASSWORD:}
+      bucket: ${RAGKB_STORAGE_MINIO_BUCKET:kb-bucket-0814}
   cors:
     allowed-origins: ${RAGKB_CORS_ALLOWED_ORIGINS:http://localhost:3000}
   # 数据访问开关：false（默认）脚手架阶段无数据库也能启动；

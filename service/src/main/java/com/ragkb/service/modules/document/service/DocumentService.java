@@ -16,6 +16,7 @@ import com.ragkb.service.modules.document.dto.UpdateDocumentMetadataDto;
 import com.ragkb.service.modules.document.dto.UploadInitDto;
 import com.ragkb.service.modules.document.vo.UploadInitResponseVo;
 
+import java.io.InputStream;
 import java.util.List;
 
 /**
@@ -71,6 +72,18 @@ public interface DocumentService {
 
     /** 搜索命中按当前权限重新授权后的摘录。 */
     Object getSearchExcerpt(String hitId);
+
+    /**
+     * 在线预览：返回文档当前版本的原始字节流（需 VIEW_CONTENT 权限）。
+     * 调用方（Controller）负责设置 Content-Type / Content-Disposition。
+     */
+    InputStream previewDocument(long documentId);
+
+    /**
+     * 下载原文：返回指定版本（versionId=null 时取当前版本）的原始字节流
+     * （需 DOWNLOAD_ORIGINAL 权限）。调用方负责设置 attachment 响应头。
+     */
+    InputStream downloadDocument(long documentId, Long versionId);
 
     /** 全文搜索（cursor 游标分页）。 */
     CursorPageData<?> search(String keyword, List<Long> kbIds, String dateFrom, String dateTo,

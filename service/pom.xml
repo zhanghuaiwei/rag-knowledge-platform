@@ -87,6 +87,15 @@
       <scope>runtime</scope>
     </dependency>
 
+    <!-- 对象存储：MinIO Java SDK（S3 兼容）。
+         由 ragkb.storage.type 切换 local / minio（见 application.yml）；
+         领域层只依赖 ObjectStorePort，不感知具体 SDK。 -->
+    <dependency>
+      <groupId>io.minio</groupId>
+      <artifactId>minio</artifactId>
+      <version>8.5.14</version>
+    </dependency>
+
     <!-- 测试 -->
     <dependency>
       <groupId>org.springframework.boot</groupId>
