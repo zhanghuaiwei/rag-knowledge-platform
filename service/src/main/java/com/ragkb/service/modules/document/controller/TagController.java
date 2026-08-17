@@ -5,6 +5,7 @@ import com.ragkb.service.modules.document.vo.TagVo;
 import com.ragkb.service.modules.document.dto.CreateTagDto;
 import com.ragkb.service.modules.document.service.DocumentService;
 import jakarta.validation.Valid;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -19,8 +20,10 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 
+// 装配条件：标签依赖数据库持久化（ragkb.db.enabled=true），scaffold 模式下端点整体下线。
 @RestController
 @RequestMapping("/api/v1/tags")
+@ConditionalOnProperty(name = "ragkb.db.enabled", havingValue = "true")
 public class TagController {
 
     private final DocumentService documentService;

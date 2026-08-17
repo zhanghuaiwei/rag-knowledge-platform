@@ -100,10 +100,42 @@ class JdbcUserCredentialStoreTest {
     }
 
     @Test
-    void updatePasswordIsManualSkeletonUntilHumanImplements() {
-        // ⚠️ 谨慎区人工实现点：骨架当前抛 UnsupportedOperationException；人工实现后替换为行为断言
-        org.junit.jupiter.api.Assertions.assertThrows(UnsupportedOperationException.class,
-                () -> store.updatePassword(7L, "$2y$10$new", Instant.now(), null, true));
+    void updatePasswordAtomicallySetsHashAndRestoresHealthyState() {
+        when(userCredentialMapper.update(isNull(), any())).thenReturn(1);
+
+        // 启用过期策略：传非 null 过期时间
+        Instant now = Instant.now();
+        Instant expiresAt = now.plus(Duration.ofDays(180));
+        store.updatePassword(7L, "$2y$10$new", now, expiresAt, true);
+
+        // 必须单条原子 UPDATE（无读改写），SET 覆盖哈希/改密时间/过期时间/改密标志并恢复健康态
+        ArgumentCaptor<LambdaUpdateWrapper<UserCredential>> captor =
+                ArgumentCaptor.forClass(LambdaUpdateWrapper.class);
+        verify(userCredentialMapper, times(1)).update(isNull(), captor.capture());
+        String sqlSet = captor.getValue().getSqlSet();
+        assertTrue(sqlSet.contains("password_hash"), "必须写入新密码哈希");
+        assertTrue(sqlSet.contains("password_changed_at"), "必须刷新改密时间（过期判定起点）");
+        assertTrue(sqlSet.contains("password_expires_at"), "启用过期策略时必须写入过期时间");
+        assertTrue(sqlSet.contains("must_change_password"), "必须写入 must_change_password 标志");
+        assertTrue(sqlSet.contains("status"), "改密/重置后凭据必须恢复 ACTIVE");
+        assertTrue(sqlSet.contains("failed_attempts"), "必须清零失败计数");
+        assertTrue(sqlSet.contains("locked_until = NULL"), "必须清空锁定时限");
+        assertTrue(captor.getValue().getSqlSegment().contains("id"), "必须按凭据 id 定位");
+        verify(userCredentialMapper, never()).selectOne(any());
+    }
+
+    @Test
+    void updatePasswordWritesNullExpiryWhenPolicyDisabled() {
+        when(userCredentialMapper.update(isNull(), any())).thenReturn(1);
+
+        // 未启用过期策略（expiryDays<=0）：显式写 NULL 覆盖历史残留
+        store.updatePassword(7L, "$2y$10$new", Instant.now(), null, false);
+
+        ArgumentCaptor<LambdaUpdateWrapper<UserCredential>> captor =
+                ArgumentCaptor.forClass(LambdaUpdateWrapper.class);
+        verify(userCredentialMapper).update(isNull(), captor.capture());
+        assertTrue(captor.getValue().getSqlSet().contains("password_expires_at = NULL"),
+                "未启用过期策略时必须显式置 NULL");
     }
 
     @Test

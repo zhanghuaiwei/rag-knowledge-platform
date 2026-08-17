@@ -1,6 +1,7 @@
 package com.ragkb.service.modules.document.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ragkb.service.common.api.PageData;
@@ -10,7 +11,6 @@ import com.ragkb.service.common.model.Task;
 import com.ragkb.service.common.model.TenantId;
 import com.ragkb.service.common.model.UserId;
 import com.ragkb.service.common.security.SecurityUtils;
-import com.ragkb.service.common.storage.ObjectStorePort;
 import com.ragkb.service.modules.document.dto.AclSetDto;
 import com.ragkb.service.modules.document.dto.DeletionDto;
 import com.ragkb.service.modules.document.dto.RollbackVersionDto;
@@ -41,9 +41,11 @@ import com.ragkb.service.modules.document.vo.UploadInitResponseVo;
 import com.ragkb.service.modules.ingestion.service.IngestionUseCase;
 import com.ragkb.service.modules.identity.service.TokenService;
 import com.ragkb.service.modules.access.service.AccessPolicyUseCase;
+import com.ragkb.service.modules.infrastructure.objectstore.port.ObjectStorePort;
 import com.ragkb.service.modules.knowledge.service.KbService;
 import com.ragkb.service.modules.task.service.TaskService;
 import com.ragkb.service.util.TodoSupport;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
@@ -79,7 +81,7 @@ import java.util.stream.Collectors;
  *                                  事务写 document/document_version/parse_task/outbox →
  *                                  返回 SUCCEEDED 任务（resourceId=documentId 供前端回读）
  * </pre>
- * 原始字节只进对象存储（本地开发为 {@link com.ragkb.service.modules.infrastructure.objectstore.LocalObjectStore}），
+ * 原始字节只进对象存储（本地开发为 {@link com.ragkb.service.modules.infrastructure.objectstore.adapter.LocalObjectStore}），
  * 数据库只存 {@code object_key + content_sha256}（不可逆摘要，DDL 注释边界）。
  *
  * <p>⚠️ 说明：
@@ -91,7 +93,10 @@ import java.util.stream.Collectors;
  *   <li>{@code ownerName / createdBy} 展示字段待接入身份目录按 userId 查名，当前置空。</li>
  * </ul>
  */
+// 装配条件：本实现依赖 MyBatis Mapper（仅 ragkb.db.enabled=true 时注册），为避免
+// scaffold 模式（无数据库）上下文装配失败，与所属 Controller 一起按同一开关条件装配。
 @Service
+@ConditionalOnProperty(name = "ragkb.db.enabled", havingValue = "true")
 public class DocumentServiceImpl implements DocumentService {
 
     // ---------- 上传/文档校验常量（与服务端安全基线一致） ----------
@@ -405,6 +410,29 @@ public class DocumentServiceImpl implements DocumentService {
         // 此处仅登记完成态任务供前端确认；request.reason() 留痕于审计（当前仅日志）。
         return taskService.submit("DELETE", "SUCCEEDED", "文档删除申请已受理", 100,
                 "DOCUMENT", String.valueOf(documentId), request.reason());
+    }
+
+    @Override
+    @Transactional
+    public List<Long> softDeleteDocumentsByKb(long tenantId, long kbId) {
+        // ① 先查出该库下全部未删文档 id（@TableLogic 自动过滤 del_flag=1），供调用方清理向量使用。
+        List<Document> documents = documentMapper.selectList(new LambdaQueryWrapper<Document>()
+                .eq(Document::getTenantId, tenantId)
+                .eq(Document::getKbId, kbId)
+                .select(Document::getId));
+        if (documents.isEmpty()) {
+            // 库内无文档：无需标记，直接返回空清单（幂等）。
+            return List.of();
+        }
+        // ② 批量软删标记：lifecycle=DELETING + del_flag=1（ck_document_del_flag 要求两列一致；
+        //    del_flag 为 @TableLogic 字段、实体更新不落 SET，故用 wrapper setSql 显式置 1）。
+        documentMapper.update(null, new LambdaUpdateWrapper<Document>()
+                .eq(Document::getTenantId, tenantId)
+                .eq(Document::getKbId, kbId)
+                .set(Document::getLifecycleStatus, LIFECYCLE_DELETING)
+                .setSql("del_flag = 1"));
+        // ③ 返回受影响文档 id（对象存储原文与向量的物理清理由调用方异步执行）。
+        return documents.stream().map(Document::getId).toList();
     }
 
     @Override

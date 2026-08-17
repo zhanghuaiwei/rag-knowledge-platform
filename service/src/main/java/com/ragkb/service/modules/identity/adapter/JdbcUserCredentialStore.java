@@ -55,16 +55,25 @@ public class JdbcUserCredentialStore implements UserCredentialStorePort {
     @Transactional
     public void updatePassword(long credentialId, String newPasswordHash, Instant now,
                                Instant passwordExpiresAt, boolean mustChangePassword) {
-        // ⚠️ 谨慎区（人工实现）：单条原子 UPDATE ——
-        //   SET password_hash = #{newPasswordHash}
-        //     , password_changed_at = #{now}
-        //     , password_expires_at = #{passwordExpiresAt}
-        //     , must_change_password = #{mustChangePassword}
-        //     , status = 'ACTIVE'               -- 重置/改密后解除锁定与禁用
-        //     , failed_attempts = 0
-        //     , locked_until = NULL
-        //   WHERE id = #{credentialId}
-        throw new UnsupportedOperationException("TODO: 人工实现 JdbcUserCredentialStore#updatePassword");
+        // 单条原子 UPDATE 置新密码（改密/重置共用原语）：
+        //   改密成功即恢复健康态 —— status=ACTIVE（解除锁定/禁用）、清失败计数与锁定时限，
+        //   满足 DDL CHECK「status='LOCKED' 必须 locked_until 非空」的反向约束。
+        LambdaUpdateWrapper<UserCredential> update = new LambdaUpdateWrapper<UserCredential>()
+                .eq(UserCredential::getId, credentialId)                              // 按凭据主键精确定位
+                .set(UserCredential::getPasswordHash, newPasswordHash)                // 只存 BCrypt 哈希，永不落明文
+                .set(UserCredential::getPasswordChangedAt, now)                       // 记录本次改密时间（过期判定起点）
+                .set(UserCredential::getMustChangePassword, mustChangePassword)       // 自助改密=false；管理员重置/建号=true
+                .set(UserCredential::getStatus, "ACTIVE")                             // 改密成功视为凭据恢复可用
+                .set(UserCredential::getFailedAttempts, 0)                            // 清历史失败计数
+                .setSql("locked_until = NULL");                                       // 清锁定时限（配合 status 解除锁定）
+        if (passwordExpiresAt != null) {
+            // 启用密码过期策略：写入新过期时间点（now + expiryDays 由调用方计算）
+            update.set(UserCredential::getPasswordExpiresAt, passwordExpiresAt);
+        } else {
+            // 未启用过期策略（expiryDays<=0）：显式写 NULL 覆盖历史残留，保证判定语义一致
+            update.setSql("password_expires_at = NULL");
+        }
+        userCredentialMapper.update(null, update);
     }
 
     @Override

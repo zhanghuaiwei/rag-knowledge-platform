@@ -1,7 +1,7 @@
-package com.ragkb.service.modules.infrastructure.objectstore;
+package com.ragkb.service.modules.infrastructure.objectstore.adapter;
 
 import com.ragkb.service.common.model.TenantId;
-import com.ragkb.service.common.storage.ObjectStorePort;
+import com.ragkb.service.modules.infrastructure.objectstore.port.ObjectStorePort;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;

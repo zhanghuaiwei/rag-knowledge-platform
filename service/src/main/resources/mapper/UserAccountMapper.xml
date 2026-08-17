@@ -127,4 +127,24 @@
           AND so.status = 'ACTIVE'
     </select>
 
+    <!-- 最后一名管理员保护：只统计成员状态 ACTIVE（排除 SUSPENDED）且未逻辑删除的 TENANT_ADMIN -->
+    <select id="countActiveTenantAdmins" resultType="long">
+        SELECT count(*)
+        FROM tenant_member_role tmr
+        JOIN tenant_member tm
+          ON tm.tenant_id = tmr.tenant_id
+         AND tm.user_id = tmr.user_id
+         AND tm.status = 'ACTIVE'
+         AND tm.del_flag = 0
+        WHERE tmr.tenant_id = #{tenantId}
+          AND tmr.role = 'TENANT_ADMIN'
+          AND tmr.del_flag = 0
+    </select>
+
+    <!-- 安全审计事件（detail/occurred_at/create_time 走数据库默认值；不落密码等敏感值） -->
+    <insert id="insertAuditLog">
+        INSERT INTO audit_log (tenant_id, actor_type, actor_id, action, resource_type, resource_id, result)
+        VALUES (#{tenantId}, 'USER', #{actorId}, #{action}, 'tenant_member', #{resourceId}, 'SUCCEEDED')
+    </insert>
+
 </mapper>

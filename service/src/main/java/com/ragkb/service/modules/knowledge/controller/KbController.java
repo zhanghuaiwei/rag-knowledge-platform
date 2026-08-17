@@ -12,6 +12,7 @@ import com.ragkb.service.modules.knowledge.dto.KbMemberDto;
 import com.ragkb.service.modules.knowledge.dto.KbUpdateDto;
 import com.ragkb.service.modules.knowledge.service.KbService;
 import jakarta.validation.Valid;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -22,8 +23,11 @@ import java.util.List;
  * 知识库接口入口（CRUD / 成员 / 索引构建）。业务实现见 {@link KbService}。
  * 建立后续知识接入、治理、授权、索引、检索和问答共同依赖的根资源
  */
+// 装配条件：知识库域依赖数据库持久化（ragkb.db.enabled=true），scaffold 模式下端点整体下线
+// （与 conversation/identity/document 模块的条件装配约定一致）。
 @RestController
 @RequestMapping("/api/v1")
+@ConditionalOnProperty(name = "ragkb.db.enabled", havingValue = "true")
 public class KbController {
 
     private final KbService kbService;

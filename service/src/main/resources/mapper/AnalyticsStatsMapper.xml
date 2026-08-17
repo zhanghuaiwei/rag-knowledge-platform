@@ -1,0 +1,164 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ragkb.service.modules.analytics.persistence.mapper.AnalyticsStatsMapper">
+
+    <!--
+        analytics 读模型：跨表统计聚合（chat_message / chat_message_source / document / kb）。
+        · 原表 CRUD 在各业务模块 Mapper；此处只收口只读聚合，避免 analytics 反向散落到业务模块；
+        · 全部手写 tenant_id 过滤（多租户隔离）与 del_flag = 0（@TableLogic 不作用于手写 XML）；
+        · date_trunc 的 bucket/tz 由服务层白名单（day|week|month / Asia/Shanghai）传入；
+        · 审计列名对齐 V0.3 迁移：create_time（原 created_at 已改名）。
+    -->
+
+    <!-- 按时间桶聚合的问答用量行映射（列名 → UsageBucketRow 属性）。 -->
+    <resultMap id="UsageBucketRowMap" type="com.ragkb.service.modules.analytics.persistence.query.UsageBucketRow">
+        <result property="statDate" column="stat_date"/>
+        <result property="qaCount" column="qa_count"/>
+        <result property="noAnswerCount" column="no_answer_count"/>
+        <result property="lowConfCount" column="low_conf_count"/>
+        <result property="tokenIn" column="token_in"/>
+        <result property="tokenOut" column="token_out"/>
+    </resultMap>
+
+    <!-- 按时间桶去重活跃用户行映射。 -->
+    <resultMap id="ActiveUserBucketRowMap" type="com.ragkb.service.modules.analytics.persistence.query.ActiveUserBucketRow">
+        <result property="statDate" column="stat_date"/>
+        <result property="activeUsers" column="active_users"/>
+    </resultMap>
+
+    <!-- 问答质量汇总行映射。 -->
+    <resultMap id="AnswerQualityRowMap" type="com.ragkb.service.modules.analytics.persistence.query.AnswerQualityRow">
+        <result property="totalAnswers" column="total_answers"/>
+        <result property="noAnswerCount" column="no_answer_count"/>
+        <result property="lowConfCount" column="low_conf_count"/>
+        <result property="avgConfidence" column="avg_confidence"/>
+    </resultMap>
+
+    <!-- 热门文档聚合行映射。 -->
+    <resultMap id="TopDocumentRowMap" type="com.ragkb.service.modules.analytics.persistence.query.TopDocumentRow">
+        <result property="documentId" column="document_id"/>
+        <result property="fileName" column="file_name"/>
+        <result property="kbName" column="kb_name"/>
+        <result property="qaCount" column="qa_count"/>
+        <result property="searchCount" column="search_count"/>
+    </resultMap>
+
+    <!-- 文档新鲜度计数行映射。 -->
+    <resultMap id="DocFreshnessRowMap" type="com.ragkb.service.modules.analytics.persistence.query.DocFreshnessRow">
+        <result property="totalDocs" column="total_docs"/>
+        <result property="freshDocs" column="fresh_docs"/>
+    </resultMap>
+
+    <!--
+        按日/周/月桶聚合问答用量：
+        · 仅统计 role = 'ASSISTANT' 的回答消息（一次回答 = 一次问答）；
+        · 无答案 / 低置信按 answer_status 枚举（DDL CHECK：ANSWERED/NO_ANSWER/LOW_CONFIDENCE/...）过滤计数；
+        · create_time 为 TIMESTAMPTZ，先 AT TIME ZONE 转业务时区本地时间再截断，避免跨时区桶错位。
+    -->
+    <select id="selectUsageBuckets" resultMap="UsageBucketRowMap">
+        SELECT
+            to_char(date_trunc(#{bucket}, m.create_time AT TIME ZONE #{tz}), 'YYYY-MM-DD') AS stat_date,
+            COUNT(*)::bigint                                                        AS qa_count,
+            COUNT(*) FILTER (WHERE m.answer_status = 'NO_ANSWER')::bigint           AS no_answer_count,
+            COUNT(*) FILTER (WHERE m.answer_status = 'LOW_CONFIDENCE')::bigint      AS low_conf_count,
+            COALESCE(SUM(m.token_in), 0)::bigint                                    AS token_in,
+            COALESCE(SUM(m.token_out), 0)::bigint                                   AS token_out
+        FROM chat_message m
+        WHERE m.tenant_id = #{tenantId}
+          AND m.del_flag = 0
+          AND m.role = 'ASSISTANT'
+          AND m.create_time >= #{since}
+        GROUP BY stat_date
+        ORDER BY stat_date
+    </select>
+
+    <!--
+        按时间桶统计去重活跃用户：
+        · chat_message 无 user_id，JOIN chat_session（同租户 + 未删）取消息归属用户；
+        · 任一角色消息（USER 提问 / ASSISTANT 回答）都算活跃行为。
+    -->
+    <select id="selectActiveUserBuckets" resultMap="ActiveUserBucketRowMap">
+        SELECT
+            to_char(date_trunc(#{bucket}, m.create_time AT TIME ZONE #{tz}), 'YYYY-MM-DD') AS stat_date,
+            COUNT(DISTINCT s.user_id)::bigint                                               AS active_users
+        FROM chat_message m
+        JOIN chat_session s
+          ON s.tenant_id = m.tenant_id
+         AND s.id = m.session_id
+         AND s.del_flag = 0
+        WHERE m.tenant_id = #{tenantId}
+          AND m.del_flag = 0
+          AND m.create_time >= #{since}
+        GROUP BY stat_date
+        ORDER BY stat_date
+    </select>
+
+    <!--
+        问答质量单行汇总（近 N 天）：
+        · 分母为回答总数；AVG(confidence) 在无行时为 NULL，由服务层兜底为 0；
+        · 与 usage 桶查询同源同窗口，保证比率分子分母口径一致。
+    -->
+    <select id="selectAnswerQuality" resultMap="AnswerQualityRowMap">
+        SELECT
+            COUNT(*)::bigint                                                        AS total_answers,
+            COUNT(*) FILTER (WHERE answer_status = 'NO_ANSWER')::bigint             AS no_answer_count,
+            COUNT(*) FILTER (WHERE answer_status = 'LOW_CONFIDENCE')::bigint        AS low_conf_count,
+            AVG(confidence)                                                         AS avg_confidence
+        FROM chat_message
+        WHERE tenant_id = #{tenantId}
+          AND del_flag = 0
+          AND role = 'ASSISTANT'
+          AND create_time >= #{since}
+    </select>
+
+    <!--
+        近 N 天被引用最多的文档 TOP N：
+        · qa_count：引用该文档的回答条数（DISTINCT message_id，一次回答只计一次）；
+        · search_count：来源命中总行数（同一回答引用多次重复计，体现检索热度）；
+        · JOIN chat_message 限定引用属于真实回答消息，排除孤儿来源行；
+        · kb 用 LEFT JOIN：库被删时仍统计该文档，kbName 为 null（不因库删除丢统计）。
+    -->
+    <select id="selectTopDocuments" resultMap="TopDocumentRowMap">
+        SELECT
+            d.id                         AS document_id,
+            d.file_name                  AS file_name,
+            k.name                       AS kb_name,
+            COUNT(DISTINCT cms.message_id)::bigint AS qa_count,
+            COUNT(*)::bigint                      AS search_count
+        FROM chat_message_source cms
+        JOIN chat_message m
+          ON m.tenant_id = cms.tenant_id
+         AND m.id = cms.message_id
+         AND m.del_flag = 0
+        JOIN document d
+          ON d.tenant_id = cms.tenant_id
+         AND d.id = cms.document_id
+         AND d.del_flag = 0
+        LEFT JOIN kb k
+          ON k.tenant_id = d.tenant_id
+         AND k.id = d.kb_id
+         AND k.del_flag = 0
+        WHERE cms.tenant_id = #{tenantId}
+          AND cms.del_flag = 0
+          AND cms.create_time >= #{since}
+        GROUP BY d.id, d.file_name, k.name
+        ORDER BY qa_count DESC, search_count DESC, d.id
+        LIMIT #{limit}
+    </select>
+
+    <!--
+        在库文档总数与近 N 天更新数：
+        · fresh_docs 按 update_time >= freshSince 计数（新上传文档 create_time 由触发器/填充器同步写 update_time）；
+        · 服务层用 fresh_docs / total_docs 计算 freshnessScore。
+    -->
+    <select id="selectDocFreshness" resultMap="DocFreshnessRowMap">
+        SELECT
+            COUNT(*)::bigint                                               AS total_docs,
+            COUNT(*) FILTER (WHERE update_time >= #{freshSince})::bigint   AS fresh_docs
+        FROM document
+        WHERE tenant_id = #{tenantId}
+          AND del_flag = 0
+          AND lifecycle_status = 'ACTIVE'
+    </select>
+
+</mapper>

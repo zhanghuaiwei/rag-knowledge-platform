@@ -70,4 +70,12 @@ public interface UserAccountService {
      * <p>⚠️ 谨慎区（人工实现）：可选吊销该用户 refresh 家族；写 {@code audit_log}。
      */
     void resetPassword(long userId, String newPassword);
+
+    /**
+     * 批量解析租户内用户的显示名（知识库成员列表等跨模块展示场景）。
+     *
+     * <p>仅返回「属于该租户且未删除」的用户；不在结果中的 userId 即非本租户成员
+     * （调用方可据此做成员合法性校验，deny-by-default）。
+     */
+    java.util.Map<Long, String> displayNamesOf(long tenantId, java.util.Collection<Long> userIds);
 }

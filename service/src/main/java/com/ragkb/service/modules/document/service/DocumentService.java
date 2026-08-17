@@ -57,6 +57,13 @@ public interface DocumentService {
     /** 文档软删除：提交删除申请，异步处置。 */
     Task deleteDocument(long documentId, DeletionDto request, String idempotencyKey);
 
+    /**
+     * 按知识库批量软删文档（知识库删除的级联步骤，由 knowledge 模块经本 Service 调用）：
+     * 将该库下全部未删文档标记 lifecycle=DELETING + del_flag=1，
+     * 返回受影响的文档 id 列表（供调用方异步清理 rag-engine 向量）。
+     */
+    List<Long> softDeleteDocumentsByKb(long tenantId, long kbId);
+
     Task reparseDocument(long documentId, String idempotencyKey);
 
     DocumentDetailVo rollbackVersion(long documentId, RollbackVersionDto request);
