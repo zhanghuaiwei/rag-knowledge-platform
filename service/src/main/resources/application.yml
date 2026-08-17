@@ -53,11 +53,15 @@ management:
 # 脚手架阶段无数据库/对象存储连接；业务数据源在对应模块实现时按
 # 04-数据库设计 接入，凭证一律走环境变量，禁止硬编码。
 
-# rag-engine（Python）对接配置（06-架构方案）；实际对接由人工在
+# rag-engine（Python）对接配置（06-架构方案）；最小问答闭环在
 # modules/rag/adapter/RagEngineHttpClient 中实现。
 rag-engine:
   base-url: ${RAG_ENGINE_BASE_URL:http://localhost:8000}
   timeout-ms: ${RAG_ENGINE_TIMEOUT_MS:10000}
+  # 问答 SSE 流：LLM 首个事件等待上限（正文可长流，故独立于普通调用超时）。
+  chat-timeout-ms: ${RAG_ENGINE_CHAT_TIMEOUT_MS:120000}
+  # 摄取投递/状态回写轮询间隔（parse_task QUEUED→rag-engine→RUNNING→轮询终态）。
+  dispatch-interval-ms: ${RAG_ENGINE_DISPATCH_INTERVAL_MS:5000}
 
 # 对象存储（原文不可变 ADR-6）：local = 本地文件系统（开发兜底）| minio = MinIO/S3
 #   * minio 模式凭证与 deploy/compose 的 MINIO_ROOT_USER/PASSWORD 对齐；

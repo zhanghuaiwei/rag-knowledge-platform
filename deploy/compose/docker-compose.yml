@@ -6,6 +6,9 @@
 #     —— Milvus 需 >4GB 内存、Ollama 大模型 4GB+，2G 实例不可行。
 #   * SearchIndex（OpenSearch）尚未对接，待 S1 契约冻结后再评估。
 #   * rag-engine / server / web 当前均为骨架或依赖后期对接，暂不编排。
+#   * 2026-08-17：postgres 换 pgvector/pgvector:pg16-alpine（alpine/musl 与旧镜像一致，
+#     pgdata 卷可直接复用，数据不丢）；chunk_meta.embedding 由 deploy/ddl/migrations/
+#     V0.6__pgvector_chunks.sql 迁移启用（需先跑该迁移再摄取）。
 #
 # 安全边界（对齐 SECURITY.md / 04-数据库设计）：
 #   * 不硬编码任何密码 —— 从 .env 注入（.env 不提交仓库，模板见 deploy/compose/.env.example）。
@@ -32,7 +35,9 @@ name: ragkb
 
 services:
   postgres:
-    image: postgres:16-alpine
+    # 2026-08-17：pgvector 扩展镜像（pg16-alpine，musl 与旧镜像一致，pgdata 卷可复用）。
+    # 重建容器：cd deploy/compose && docker compose up -d --force-recreate postgres
+    image: pgvector/pgvector:pg16-alpine
     container_name: ragkb-postgres
     restart: unless-stopped
     mem_limit: 512m

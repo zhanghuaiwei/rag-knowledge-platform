@@ -13,13 +13,19 @@ class SearchQuery(BaseModel):
 
     question: str = Field(min_length=1)
     tenant_id: int = Field(gt=0)
+    kb_ids: list[int] = Field(default_factory=list)
     allowed_document_ids: list[str] = Field(default_factory=list)
     top_k: int = Field(default=5, ge=1, le=100)
     fusion: str = Field(default="RRF", min_length=1)
 
 
 class RetrievedChunk(BaseModel):
-    """带版本、位置与相关性分数的候选分块。"""
+    """带版本、位置与相关性分数的候选分块。
+
+    2026-08-17 扩展：补充 chunk_meta 落库所需字段（tenant/kb/ordinal/block_type/
+    page/section_path/token_count）。摄取流水线用它们直写 chunk_meta；
+    检索路径只消费 chunk_id/document_id/version_id/text/score 及来源定位。
+    """
 
     chunk_id: str = Field(min_length=1)
     document_id: str = Field(min_length=1)
@@ -27,6 +33,14 @@ class RetrievedChunk(BaseModel):
     text: str = Field(min_length=1)
     location: Any = None
     score: float = Field(ge=0)
+    tenant_id: int = Field(default=1, gt=0)
+    kb_id: int = Field(default=1, gt=0)
+    ordinal: int = Field(default=0, ge=0)
+    block_type: str = Field(default="text", min_length=1)
+    page_no: int | None = Field(default=None, ge=1)
+    section_path: list[str] = Field(default_factory=list)
+    token_count: int = Field(default=1, ge=1)
+    file_name: str = Field(default="", min_length=0)
 
 
 class SearchResult(BaseModel):

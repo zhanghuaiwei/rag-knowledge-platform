@@ -32,6 +32,7 @@ def submit_document(
         object_key=request.object_key,
         kb_id=request.kb_id,
         kb_config=request.kb_config.model_dump(),
+        version_id=request.version_id,
     )
     background_tasks.add_task(service.process_document, task_id)
     return IngestAccepted(task_id=task_id)

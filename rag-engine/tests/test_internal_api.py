@@ -43,6 +43,7 @@ def test_ingest_is_accepted_then_fails_closed_without_providers() -> None:
             "tenantId": 1,
             "kbId": 10,
             "versionNo": 1,
+            "versionId": 1001,
         },
     )
 
@@ -127,7 +128,8 @@ def test_chat_emits_meta_then_no_answer_final_without_echoing_question() -> None
     data_lines = [line[6:] for line in response.text.splitlines() if line.startswith("data: ")]
     payloads = [json.loads(line) for line in data_lines]
     assert payloads[0]["requestId"] == "req-chat-1"
-    assert payloads[1]["answerStatus"] == "no_answer"
+    # 与前端 AnswerStatus 对齐：大写枚举（Java 侧透传，不再使用小写 no_answer）。
+    assert payloads[1]["answerStatus"] == "NO_ANSWER"
     assert payloads[1]["sources"] == []
 
 

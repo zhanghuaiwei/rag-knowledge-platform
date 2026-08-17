@@ -24,6 +24,18 @@ import java.util.List;
  */
 public interface DocumentService {
 
+    /** 文档版本的摄取来源（供摄取调度器投递 rag-engine 使用；objectKey 为对象存储引用）。 */
+    record DocumentIngestSource(long documentId, long versionId, long kbId,
+                                long versionNo, String objectKey) {
+    }
+
+    /** 读取文档版本的摄取来源（objectKey/版本号/kbId）；不存在抛 {@code NOT_FOUND}。 */
+    DocumentIngestSource ingestSource(long versionId);
+
+    /** 回写文档版本摄取状态：READY→chunkCount+ready_at；FAILED→error_code；其余仅推进状态。 */
+    void updateIngestStatus(long versionId, String ingestStatus, Integer chunkCount, String errorCode);
+
+
     /** kbId 为 null 时列出授权范围内全部文档。 */
     PageData<DocumentSummaryVo> listDocuments(
             Long kbId, String reviewStatus, String ingestStatus, String sensitivity,

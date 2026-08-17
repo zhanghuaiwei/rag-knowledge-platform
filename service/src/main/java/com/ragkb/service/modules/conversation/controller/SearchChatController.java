@@ -10,6 +10,7 @@ import com.ragkb.service.modules.conversation.dto.ChatSessionCreateDto;
 import com.ragkb.service.modules.conversation.dto.FeedbackDto;
 import com.ragkb.service.modules.conversation.service.SearchChatService;
 import jakarta.validation.Valid;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -28,8 +29,12 @@ import java.util.List;
 
 /**
  * 搜索与智能问答接口入口（全文搜索 / 问答 SSE）。业务实现见 {@link SearchChatService}。
+ *
+ * <p>依赖 chat_session 等 DB 表，随 {@code ragkb.db.enabled} 开关注册
+ * （免库脚手架模式不挂载本控制器，与对应 Service 实现一致）。
  */
 @RestController
+@ConditionalOnProperty(name = "ragkb.db.enabled", havingValue = "true")
 public class SearchChatController {
 
     private final SearchChatService searchChatService;

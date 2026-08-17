@@ -1,12 +1,21 @@
 """全文搜索应用用例。"""
 
+from __future__ import annotations
+
 from datetime import date
+from typing import TYPE_CHECKING
 
 from rag_engine.retrieval.models import SearchPageSnapshot
 
+if TYPE_CHECKING:
+    from rag_engine.indexing.ports import SearchIndex
+
 
 class RetrievalService:
-    """未配置授权索引时返回稳定空结果的最小检索服务。"""
+    """全文搜索用例；未装配授权索引时返回稳定空结果（不泄露索引内容）。"""
+
+    def __init__(self, *, search_index: SearchIndex | None = None) -> None:
+        self._search_index = search_index
 
     def search(
         self,
@@ -22,11 +31,10 @@ class RetrievalService:
         page: int,
         size: int,
     ) -> SearchPageSnapshot:
-        """返回确定性空分页，避免泄露或伪造索引内容。
+        """返回分页命中；未装配索引时返回确定性空分页。
 
-        TODO(RetrievalService.search): v0.2 契约冻结后验证签名
-        RetrievalAccessContext，构造 tenant/KB/document/state 过滤，调用 SearchIndex，
-        并在返回前对候选文档二次授权。
+        TODO(RetrievalService.search): v0.2 契约冻结后验证授权上下文并二次授权候选文档。
+        最小闭环先走问答（chat）路径，全文搜索端点保持空结果。
         """
         del (
             request_id,
@@ -38,4 +46,6 @@ class RetrievalService:
             date_to,
             vector_fusion,
         )
+        if self._search_index is None:
+            return SearchPageSnapshot(items=(), total=0, page=page, size=size, has_more=False)
         return SearchPageSnapshot(items=(), total=0, page=page, size=size, has_more=False)

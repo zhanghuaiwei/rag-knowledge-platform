@@ -12,17 +12,40 @@ import java.util.function.Consumer;
  * <p>实现对应 {@code docs/api/rag-engine.openapi.yaml} 的 8 个端点：
  * ingest/documents、ingest/tasks、ingest/delete、query/chat、query/search、
  * query/rerank、engine/health、engine/route-status。集群内网调用
- * {@code http://rag-engine.ragkb.svc:8000}。
+ * {@code http://rag-engine.ragkb.svc:8000}（本地开发 {@code http://localhost:8000}）。
  *
- * <p>⚠️ 具体 HTTP 对接由人工实现（见 {@link RagEngineHttpClient}）。
- * 请求/响应 payload 此处用 {@code Map} 透传，避免与 Python 侧结构过早耦合；
- * 人工实现时按 YAML 契约定义正式 DTO。
+ * <p>2026-08-17 最小问答闭环接线：
+ * <ul>
+ *   <li>{@code parseDocument} 增加 {@code versionId / kbId}（chunk_meta 外键与 kb 过滤需要）；</li>
+ *   <li>{@code chatStream} 回调改为 {@link ChatStreamEvent}（按事件类型转发，而非裸 token）。</li>
+ * </ul>
  */
 public interface RagEnginePort {
 
-    /** POST /api/ingest/documents：触发解析（异步），返回 taskId。 */
-    String parseDocument(TenantId tenantId, long documentId, long versionNo,
-                         String objectKey, Map<String, Object> kbConfig);
+    /** 默认知识库 RAG 参数（与 Python 侧 KbConfig 默认一致）；对接方透传给 rag-engine。 */
+    static Map<String, Object> defaultKbConfig() {
+        Map<String, Object> config = new java.util.LinkedHashMap<>();
+        config.put("embeddingModel", "text-embedding-v3");
+        config.put("chunkSize", 512);
+        config.put("chunkOverlap", 50);
+        config.put("topK", 5);
+        config.put("rerankerEnabled", false);
+        return config;
+    }
+
+    /**
+     * POST /api/ingest/documents：触发解析（异步），返回 taskId。
+     *
+     * @param tenantId    租户 id
+     * @param documentId  文档 id
+     * @param versionId   document_version.id（chunk_meta 外键引用版本）
+     * @param kbId        知识库 id
+     * @param versionNo   版本号
+     * @param objectKey   对象存储 key（MinIO/S3 对象名）
+     * @param kbConfig    知识库 RAG 参数（embeddingModel/chunkSize/chunkOverlap/topK/...）
+     */
+    String parseDocument(TenantId tenantId, long documentId, long versionId, long kbId,
+                         long versionNo, String objectKey, Map<String, Object> kbConfig);
 
     /** GET /api/ingest/tasks/{id}：查询解析任务状态。 */
     Map<String, Object> getIngestTaskStatus(TenantId tenantId, String taskId);
@@ -30,8 +53,8 @@ public interface RagEnginePort {
     /** POST /api/ingest/delete：删除文档向量（幂等），返回删除数。 */
     int deleteVectors(TenantId tenantId, long documentId, Long versionNo);
 
-    /** POST /api/query/chat：混合检索问答（SSE），token 逐段回调。 */
-    void chatStream(TenantId tenantId, Map<String, Object> request, Consumer<String> onToken);
+    /** POST /api/query/chat：混合检索问答（SSE），事件逐段回调。 */
+    void chatStream(TenantId tenantId, Map<String, Object> request, Consumer<ChatStreamEvent> onEvent);
 
     /** POST /api/query/search：全文搜索（BM25 + 向量融合）。 */
     Map<String, Object> search(TenantId tenantId, Map<String, Object> query);

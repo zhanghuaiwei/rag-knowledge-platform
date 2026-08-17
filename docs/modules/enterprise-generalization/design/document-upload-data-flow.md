@@ -169,14 +169,21 @@ sequenceDiagram
 
 ## 6. 当前限制与后续事项
 
+> 2026-08-17 更新：上传三件套已实现；摄取/问答最小链路已打通（见
+> [`minimal-qa-chain.md`](./minimal-qa-chain.md)）。
+
 | 事项 | 状态 |
 |---|---|
 | 前端上传弹窗（选库/选文件/敏感级） | ✅ 已实现 |
 | mock 客户端 / 数据 / 开关 | ✅ 已删除，web 固定走真实 HTTP |
 | 后端上传契约（init/parts/complete） | ✅ Controller + DTO 已冻结 |
-| 后端真实落库 / 分片存储 / SHA-256 | ❌ 桩（501），需人工实现 |
-| 安全扫描队列（GKB-03，QUARANTINED→SCANNING） | ❌ 待实现 |
-| rag-engine 解析/OCR/分块/Embedding/索引 | ❌ provider 待接入 |
-| 上传后「进入解析队列」提示 | ⚠️ 后端未实现前上传返回 501，该提示不会出现 |
+| 后端真实落库 / 分片存储 / SHA-256 | ✅ 已实现（写 MinIO + document/document_version/parse_task/outbox） |
+| 摄取投递与状态回写 | ✅ Java 调度器轮询 parse_task → rag-engine → 回写 ingest_status |
+| rag-engine 解析/分块/Embedding/索引 | ✅ 已接 MinIO + langchain + pgvector（md/txt/csv/html） |
+| 问答闭环（会话/SSE/LLM） | ✅ 已打通（含 chat_message/chat_message_source 落库） |
+| 安全扫描队列（GKB-03，QUARANTINED→SCANNING） | ⚠️ 最小实现跳过扫描直接投递，见 §5 |
+| 全文搜索 `/api/query/search` | ⚠️ 最小闭环走问答，搜索端点仍返回空 |
+| PDF/Office / OCR | ⚠️ 摄取仅支持 md/txt/csv/html，其余 FAILED |
 
-**建议下一步**：先人工实现 `DocumentServiceImpl#initUpload / uploadPart / completeUpload`（含对象存储写入 + SHA-256 + document/document_version/parse_task/outbox 落库），再接通 rag-engine provider，最后按 `docs/api/server.openapi.yaml` 做端到端联调。
+**后续迭代**：先跑通本链路（V0.6 迁移 → rag-engine 起服务 → 重启 service → 上传/提问），
+再按 `minimal-qa-chain.md` §5 逐项补齐安全扫描、outbox 消费、全文搜索与 PDF/Office。

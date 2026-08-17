@@ -73,6 +73,7 @@ def _submit_document(client: TestClient, document_id: int) -> str:
             "objectKey": f"quarantine/document-{document_id}",
             "kbConfig": {},
             "tenantId": 1,
+            "versionId": document_id * 1000,
         },
     )
     assert response.status_code == 202
