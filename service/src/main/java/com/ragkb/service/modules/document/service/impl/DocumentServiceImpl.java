@@ -479,6 +479,42 @@ public class DocumentServiceImpl implements DocumentService {
     }
 
     // =====================================================================
+    // 摄取状态（供摄取调度器经 DocumentService 跨模块协作，避免直接依赖 document 持久化层）
+    // =====================================================================
+
+    @Override
+    public DocumentIngestSource ingestSource(long versionId) {
+        DocumentVersion version = documentVersionMapper.selectById(versionId);
+        if (version == null) {
+            throw new ApiException(ErrorCode.NOT_FOUND, "文档版本不存在");
+        }
+        Document document = documentMapper.selectById(version.getDocumentId());
+        long kbId = document != null && document.getKbId() != null ? document.getKbId() : 0L;
+        return new DocumentIngestSource(
+                version.getDocumentId(), version.getId(), kbId,
+                version.getVersionNo() == null ? 1 : version.getVersionNo(),
+                version.getObjectKey());
+    }
+
+    @Override
+    @Transactional
+    public void updateIngestStatus(long versionId, String ingestStatus, Integer chunkCount, String errorCode) {
+        DocumentVersion version = documentVersionMapper.selectById(versionId);
+        if (version == null) {
+            return;
+        }
+        version.setIngestStatus(ingestStatus);
+        if (chunkCount != null) {
+            version.setChunkCount(chunkCount);
+        }
+        version.setErrorCode(errorCode);
+        if ("READY".equals(ingestStatus)) {
+            version.setReadyAt(Instant.now());
+        }
+        documentVersionMapper.updateById(version);
+    }
+
+    // =====================================================================
     // ACL
     // =====================================================================
 

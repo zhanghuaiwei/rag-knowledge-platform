@@ -17,9 +17,10 @@ components:
         rerankerEnabled: { type: boolean, default: true }
     IngestRequest:
       type: object
-      required: [documentId, objectKey, kbConfig, tenantId]
+      required: [documentId, versionId, objectKey, kbConfig, tenantId]
       properties:
         documentId: { type: integer }
+        versionId: { type: integer }   # 2026-08-17 新增：document_version.id（chunk_meta 外键）
         objectKey: { type: string }
         kbConfig: { $ref: "#/components/schemas/KbConfig" }
         tenantId: { type: integer }
@@ -55,6 +56,7 @@ components:
               role: { type: string, enum: [user, assistant] }
               content: { type: string }
         kbConfig: { $ref: "#/components/schemas/KbConfig" }
+        tenantId: { type: integer, default: 1 }   # 2026-08-17 新增：租户过滤（Java 会话解析后透传）
     RerankRequest:
       type: object
       required: [requestId, query, candidates]

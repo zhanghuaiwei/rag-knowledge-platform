@@ -31,6 +31,10 @@ def chat(request: QueryChatRequest, service: Generator) -> StreamingResponse:
         request_id=request.request_id,
         session_id=request.session_id,
         kb_ids=request.kb_ids,
+        question=request.question,
+        history=request.history,
+        kb_config=request.kb_config,
+        tenant_id=request.tenant_id,
     )
 
     def event_stream() -> Iterator[str]:

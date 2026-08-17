@@ -11,6 +11,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 import javax.sql.DataSource;
 
@@ -30,6 +31,7 @@ import javax.sql.DataSource;
 @Configuration
 @ConditionalOnProperty(name = "ragkb.db.enabled", havingValue = "true")
 @MapperScan(basePackages = "com.ragkb.service.modules", annotationClass = Mapper.class)
+@EnableScheduling
 public class DatabaseConfig {
 
     /** Hikari 连接池。Schema 主键为数据库自增（IDENTITY），无需在应用侧生成。 */

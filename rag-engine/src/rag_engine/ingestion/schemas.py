@@ -15,6 +15,8 @@ class IngestRequest(ApiModel):
     tenant_id: int = Field(gt=0)
     kb_id: int | None = Field(default=None, gt=0)
     version_no: int = Field(default=1, ge=1)
+    # 2026-08-17 新增：document_version.id，chunk_meta 外键引用版本。
+    version_id: int = Field(gt=0)
 
 
 class IngestAccepted(ApiModel):

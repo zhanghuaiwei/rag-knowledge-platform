@@ -8,6 +8,16 @@ dependencies = [
     "uvicorn[standard]>=0.30",
     "pydantic>=2.0",
     "pydantic-settings>=2.0",
+    # ---- 最小 RAG 链路（2026-08-17 新增）----
+    # 文档分块用 langchain 的 RecursiveCharacterTextSplitter（真正的「用 langchain 处理文档」的核心件）；
+    # 向量写入/检索直连 pgvector（chunk_meta.embedding），不引入 langchain 自带向量库，避免与 DDL 脱节。
+    "langchain-text-splitters>=0.2",
+    # OpenAI 兼容 SDK：通义 DashScope / 硅基流动 / 智谱等统一走 base_url + api_key。
+    "openai>=1.40",
+    # 向量存储：psycopg[binary,pool] 提供同步连接池 + 原生 vector 类型适配。
+    "psycopg[binary,pool]>=3.2",
+    # MinIO/S3 对象存储读取原文。
+    "minio>=7.2",
 ]
 
 [project.scripts]
