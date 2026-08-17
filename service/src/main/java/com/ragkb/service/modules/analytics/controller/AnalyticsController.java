@@ -9,6 +9,7 @@ import com.ragkb.service.modules.analytics.vo.UsagePointVo;
 import com.ragkb.service.modules.analytics.service.AnalyticsService;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -23,6 +24,7 @@ import java.util.List;
  * 故返回明细点（top-documents / dau 为产品契约所需新增端点）。
  */
 @RestController
+@RequestMapping("/api/v1/analytics")
 public class AnalyticsController {
 
     private final AnalyticsService analyticsService;
@@ -31,35 +33,35 @@ public class AnalyticsController {
         this.analyticsService = analyticsService;
     }
 
-    @GetMapping("/api/v1/analytics/usage")
+    @GetMapping("/usage")
     public ApiResponse<List<UsagePointVo>> getDailyUsage(
             @RequestParam(defaultValue = "DAY") String period) {
         return ApiResponse.ok(analyticsService.getDailyUsage(period));
     }
 
-    @GetMapping("/api/v1/analytics/costs")
+    @GetMapping("/costs")
     public ApiResponse<List<TokenCostPointVo>> getTokenCosts(
             @RequestParam(defaultValue = "DAY") String period) {
         return ApiResponse.ok(analyticsService.getTokenCosts(period));
     }
 
-    @GetMapping("/api/v1/analytics/top-documents")
+    @GetMapping("/top-documents")
     public ApiResponse<List<TopDocumentPointVo>> getTopDocuments() {
         return ApiResponse.ok(analyticsService.getTopDocuments());
     }
 
-    @GetMapping("/api/v1/analytics/dau")
+    @GetMapping("/dau")
     public ApiResponse<List<DauPointVo>> getDau() {
         return ApiResponse.ok(analyticsService.getDau());
     }
 
-    @GetMapping("/api/v1/analytics/kb-health")
+    @GetMapping("/kb-health")
     public ApiResponse<KnowledgeHealthPointVo> getKnowledgeHealth() {
         return ApiResponse.ok(analyticsService.getKnowledgeHealth());
     }
 
     /** CSV 导出（application/octet-stream）。 */
-    @GetMapping("/api/v1/analytics/export")
+    @GetMapping("/export")
     public void export(
             @RequestParam String kind,
             @RequestParam String period,

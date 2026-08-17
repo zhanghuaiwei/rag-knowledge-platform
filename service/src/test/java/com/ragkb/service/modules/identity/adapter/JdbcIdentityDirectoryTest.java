@@ -7,7 +7,7 @@ import com.ragkb.service.modules.identity.persistence.mapper.IdentityAccountMapp
 import com.ragkb.service.modules.identity.persistence.mapper.SysUserMapper;
 import com.ragkb.service.modules.identity.persistence.mapper.TenantMemberMapper;
 import com.ragkb.service.modules.identity.persistence.mapper.UserCredentialMapper;
-import com.ragkb.service.modules.identity.persistence.row.TenantMembershipRow;
+import com.ragkb.service.modules.identity.persistence.query.TenantMembershipRow;
 import com.ragkb.service.modules.identity.port.IdentityDirectory;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import org.junit.jupiter.api.BeforeEach;

@@ -1,4 +1,4 @@
-package com.ragkb.service.modules.tenant.persistence.entity;
+package com.ragkb.service.modules.admin.persistence.entity;
 
 import com.ragkb.service.common.persistence.BaseAuditEntity;
 
@@ -10,7 +10,7 @@ import com.baomidou.mybatisplus.annotation.Version;
 import java.time.Instant;
 
 /**
- * {@code sys_tenant} 表实体 —— MyBatis-Plus 骨架模板。
+ * {@code sys_tenant} 表实体 —— 租户主表（与 SysOrg/SysUserOrg 同属管理中心域）。
  *
  * <p>约定（对齐 {@code deploy/ddl/init.sql}）：
  * <ul>
@@ -20,8 +20,7 @@ import java.time.Instant;
  *   <li>时间戳用 {@link Instant}（TIMESTAMPTZ），业务接口 DTO 同约定。</li>
  * </ul>
  *
- * <p>⚠️ 模板：实现其它表时复制本类，改 {@code @TableName} 与字段即可；
- * 不要在本骨架类里加业务逻辑。insert 时 null 字段不落 SQL，由数据库默认值（now() 等）填充。
+ * <p>⚠️ insert 时 null 字段不落 SQL，由数据库默认值（now() 等）填充。
  */
 @TableName("sys_tenant")
 public class SysTenant extends BaseAuditEntity {

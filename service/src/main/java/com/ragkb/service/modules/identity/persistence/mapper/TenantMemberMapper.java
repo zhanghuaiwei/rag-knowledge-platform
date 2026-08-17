@@ -2,7 +2,7 @@ package com.ragkb.service.modules.identity.persistence.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.ragkb.service.modules.identity.persistence.entity.TenantMember;
-import com.ragkb.service.modules.identity.persistence.row.TenantMembershipRow;
+import com.ragkb.service.modules.identity.persistence.query.TenantMembershipRow;
 import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;

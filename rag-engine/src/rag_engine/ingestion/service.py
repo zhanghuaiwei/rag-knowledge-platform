@@ -22,7 +22,7 @@ from rag_engine.ingestion.models import IngestStage, IngestTaskSnapshot, TaskSta
 from rag_engine.ingestion.repository import InMemoryIngestTaskRepository
 from rag_engine.parsing.models import ContentBlock
 from rag_engine.parsing.ports import ParserProvider
-from rag_engine.providers.ports import ObjectStore
+from rag_engine.providers._provider_ports import ObjectStore
 from rag_engine.retrieval.models import RetrievedChunk
 
 _PROVIDER_NOT_CONFIGURED = (
@@ -151,12 +151,17 @@ class IngestionService:
         return self._repository.get(task_id)
 
     def delete_vectors(self, *, document_id: int, version_no: int | None) -> int:
-        """幂等删除派生索引；未配置 SearchIndex 时安全返回 0。"""
+        """幂等删除派生索引；未配置 SearchIndex 时安全返回 0。
+
+        ``version_no`` 为 None 时只按 ``document_id`` 无法精确命中
+        ``chunk_meta.version_id``，此时保持 0 并把版本号回补责任交给
+        调用方（Java 侧 DocumentService），保证不会误删其他版本的向量。
+        """
         if self._search_index is None:
             return 0
-        del document_id, version_no
-        # 最小实现按任务维度无版本号时无法精确删，交由 SearchIndex 幂等处理。
-        return 0
+        if version_no is None:
+            return 0
+        return self._search_index.delete_by_version(str(version_no))
 
     # ------------------------------------------------------------------
     # 内部工具

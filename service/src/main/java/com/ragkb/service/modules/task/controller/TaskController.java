@@ -8,6 +8,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -17,6 +18,7 @@ import java.util.List;
  * 异步任务接口入口。
  */
 @RestController
+@RequestMapping("/api/v1/tasks")
 public class TaskController {
 
     private final TaskService taskService;
@@ -27,17 +29,17 @@ public class TaskController {
 
     // ---- 异步任务 ----
 
-    @GetMapping("/api/v1/tasks")
+    @GetMapping("")
     public ApiResponse<List<Task>> listTasks() {
         return ApiResponse.ok(taskService.listTasks());
     }
 
-    @GetMapping("/api/v1/tasks/{taskId}")
+    @GetMapping("/{taskId}")
     public ApiResponse<Task> getTask(@PathVariable String taskId) {
         return ApiResponse.ok(taskService.getTask(taskId));
     }
 
-    @PostMapping("/api/v1/tasks/{taskId}")
+    @PostMapping("/{taskId}")
     @ResponseStatus(HttpStatus.ACCEPTED)
     public ResponseEntity<Void> cancelTask(@PathVariable String taskId) {
         taskService.cancelTask(taskId);

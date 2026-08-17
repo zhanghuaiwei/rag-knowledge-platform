@@ -14,7 +14,7 @@ from rag_engine.generation.models import ChatEvent
 from rag_engine.generation.schemas import QueryChatRequest
 from rag_engine.generation.service import GenerationService
 
-router = APIRouter(prefix="/api/query", tags=["query"])
+router = APIRouter(prefix="/api/query", tags=["chat"])
 Generator = Annotated[GenerationService, Depends(get_generation_service)]
 
 

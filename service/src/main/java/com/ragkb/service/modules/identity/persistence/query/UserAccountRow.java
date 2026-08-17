@@ -1,4 +1,4 @@
-package com.ragkb.service.modules.identity.persistence.row;
+package com.ragkb.service.modules.identity.persistence.query;
 
 import java.time.Instant;
 

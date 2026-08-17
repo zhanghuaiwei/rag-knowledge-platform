@@ -1,17 +1,14 @@
-package com.ragkb.service.modules.tenant.persistence.mapper;
+package com.ragkb.service.modules.admin.persistence.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
-import com.ragkb.service.modules.tenant.persistence.entity.SysTenant;
+import com.ragkb.service.modules.admin.persistence.entity.SysTenant;
 import org.apache.ibatis.annotations.Mapper;
 
 /**
- * {@code sys_tenant} 表 Mapper —— MyBatis-Plus 骨架模板。
+ * {@code sys_tenant} 表 Mapper。
  *
  * <p>{@link BaseMapper} 已内置单表 CRUD 与分页（selectPage/selectById/insert/updateById/...）；
  * 复杂查询按需在 {@code resources/mapper/SysTenantMapper.xml} 写 XML，或在方法上加 {@code @Select}。
- *
- * <p>⚠️ 模板：复制本接口改名即可（{@code @MapperScan} 已覆盖本包，{@code @Mapper} 可省略，
- * 保留以便单独使用）。
  */
 @Mapper
 public interface SysTenantMapper extends BaseMapper<SysTenant> {
