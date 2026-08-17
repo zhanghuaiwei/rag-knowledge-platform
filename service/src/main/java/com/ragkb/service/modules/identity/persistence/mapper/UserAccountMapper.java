@@ -1,8 +1,8 @@
 package com.ragkb.service.modules.identity.persistence.mapper;
 
-import com.ragkb.service.modules.identity.persistence.row.UserAccountRow;
-import com.ragkb.service.modules.identity.persistence.row.UserOrgRow;
-import com.ragkb.service.modules.identity.persistence.row.UserRoleRow;
+import com.ragkb.service.modules.identity.persistence.query.UserAccountRow;
+import com.ragkb.service.modules.identity.persistence.query.UserOrgRow;
+import com.ragkb.service.modules.identity.persistence.query.UserRoleRow;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 

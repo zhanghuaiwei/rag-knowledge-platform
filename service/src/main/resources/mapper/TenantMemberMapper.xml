@@ -8,7 +8,7 @@
         供 JdbcIdentityDirectory 组装成员关系（不跨 Java 模块依赖 tenant 的持久化层）。
     -->
 
-    <resultMap id="TenantMembershipRowMap" type="com.ragkb.service.modules.identity.persistence.row.TenantMembershipRow">
+    <resultMap id="TenantMembershipRowMap" type="com.ragkb.service.modules.identity.persistence.query.TenantMembershipRow">
         <result property="tenantId" column="tenant_id"/>
         <result property="tenantCode" column="tenant_code"/>
         <result property="tenantName" column="tenant_name"/>

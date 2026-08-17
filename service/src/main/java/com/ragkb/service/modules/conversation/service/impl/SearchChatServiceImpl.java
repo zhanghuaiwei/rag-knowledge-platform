@@ -63,7 +63,8 @@ import java.util.stream.Collectors;
  *     ③ 逐事件转发（meta/token/sources/final），meta/final 补 messageId，sources 补 fileName；
  *     ④ 结束后回填 ASSISTANT 内容/状态/置信度，并按 sources 落 chat_message_source。
  * </pre>
- * 未认证/dev 场景 userId/tenantId 兜底为种子数据 (tenant 1, user 1)。
+ * 未认证请求 fail-closed：{@link #currentUserId()} 与 {@link #requireTenantId()} 会直接抛
+ * {@code UNAUTHORIZED}，绝不静默兜底种子租户/用户，避免跨租户串数据。
  */
 @Service
 @ConditionalOnProperty(name = "ragkb.db.enabled", havingValue = "true")
@@ -71,8 +72,6 @@ public class SearchChatServiceImpl implements SearchChatService {
 
     private static final Logger log = LoggerFactory.getLogger(SearchChatServiceImpl.class);
 
-    private static final long DEFAULT_TENANT_ID = 1L;
-    private static final long DEFAULT_USER_ID = 1L;
     private static final int HISTORY_BATCH = 50;
 
     private final ChatSessionMapper chatSessionMapper;
@@ -118,7 +117,7 @@ public class SearchChatServiceImpl implements SearchChatService {
 
     @Override
     public ChatSessionVo createChatSession(ChatSessionCreateDto request, String idempotencyKey) {
-        long tenantId = currentTenantIdOrNull();
+        long tenantId = requireTenantId();
         ChatSession session = new ChatSession();
         session.setTenantId(tenantId);
         session.setUserId(currentUserId());
@@ -524,19 +523,22 @@ public class SearchChatServiceImpl implements SearchChatService {
         }
     }
 
-    /** 当前用户 id；未认证/dev 兜底种子用户 1。 */
+    /** 当前用户 id；未认证直接抛 UNAUTHORIZED（fail-closed，绝不静默兜底种子用户）。 */
     private Long currentUserId() {
         Long userId = SecurityUtils.currentUserId();
-        return userId == null || userId <= 0 ? DEFAULT_USER_ID : userId;
+        if (userId == null || userId <= 0) {
+            throw new ApiException(ErrorCode.UNAUTHORIZED, "未认证或登录已过期");
+        }
+        return userId;
     }
 
-    /** 当前 JWT 主体的租户 id；未认证/dev 兜底种子租户 1。 */
-    private long currentTenantIdOrNull() {
+    /** 当前 JWT 主体的租户 id；未认证或无租户上下文直接抛 UNAUTHORIZED（fail-closed）。 */
+    private long requireTenantId() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication != null && authentication.getPrincipal() instanceof TokenService.JwtPrincipal principal
                 && principal.tenantId() > 0) {
             return principal.tenantId();
         }
-        return DEFAULT_TENANT_ID;
+        throw new ApiException(ErrorCode.UNAUTHORIZED, "未认证或缺少有效租户上下文");
     }
 }

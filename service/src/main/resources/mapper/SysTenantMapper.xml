@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
-<mapper namespace="com.ragkb.service.modules.tenant.persistence.mapper.SysTenantMapper">
+<mapper namespace="com.ragkb.service.modules.admin.persistence.mapper.SysTenantMapper">
 
     <!--
         sys_tenant 表自定义查询骨架。

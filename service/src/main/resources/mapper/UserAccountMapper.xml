@@ -9,7 +9,7 @@
         （MyBatis-Plus @TableLogic 不作用于手写 XML）。
     -->
 
-    <resultMap id="UserAccountRowMap" type="com.ragkb.service.modules.identity.persistence.row.UserAccountRow">
+    <resultMap id="UserAccountRowMap" type="com.ragkb.service.modules.identity.persistence.query.UserAccountRow">
         <result property="userId" column="user_id"/>
         <result property="displayName" column="display_name"/>
         <result property="primaryEmail" column="primary_email"/>
@@ -18,12 +18,12 @@
         <result property="mustChangePassword" column="must_change_password"/>
     </resultMap>
 
-    <resultMap id="UserRoleRowMap" type="com.ragkb.service.modules.identity.persistence.row.UserRoleRow">
+    <resultMap id="UserRoleRowMap" type="com.ragkb.service.modules.identity.persistence.query.UserRoleRow">
         <result property="userId" column="user_id"/>
         <result property="role" column="role"/>
     </resultMap>
 
-    <resultMap id="UserOrgRowMap" type="com.ragkb.service.modules.identity.persistence.row.UserOrgRow">
+    <resultMap id="UserOrgRowMap" type="com.ragkb.service.modules.identity.persistence.query.UserOrgRow">
         <result property="userId" column="user_id"/>
         <result property="orgName" column="org_name"/>
     </resultMap>

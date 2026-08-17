@@ -59,7 +59,7 @@ class GenerationService:
         question: str,
         history: list[ChatHistoryItem],
         kb_config: KbConfig,
-        tenant_id: int = 1,
+        tenant_id: int,
     ) -> Iterator[ChatEvent]:
         """生成完整 SSE 事件序列（懒迭代，LLM 边生成边产 token）。"""
         if self._search_index is None or self._llm is None:

@@ -5,7 +5,7 @@ from __future__ import annotations
 from minio import Minio
 from minio.error import S3Error
 
-from rag_engine.providers.ports import ObjectStore
+from rag_engine.providers._provider_ports import ObjectStore
 
 
 class MinioObjectStore(ObjectStore):

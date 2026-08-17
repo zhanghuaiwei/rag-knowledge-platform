@@ -20,6 +20,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
@@ -32,6 +33,7 @@ import org.springframework.web.bind.annotation.RestController;
  * 用户为全局身份，所有操作限定当前激活租户（服务端从 JWT 推导，不信任客户端自报）。
  */
 @RestController
+@RequestMapping("/api/v1/users")
 @PreAuthorize("hasAuthority('tenant-member:manage')")
 @ConditionalOnProperty(name = "ragkb.db.enabled", havingValue = "true")
 public class UserAccountController {
@@ -42,48 +44,48 @@ public class UserAccountController {
         this.userAccountService = userAccountService;
     }
 
-    @GetMapping("/api/v1/users")
+    @GetMapping("")
     public ApiResponse<PageData<UserVo>> listUsers(
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "20") int size) {
         return ApiResponse.ok(userAccountService.listUsers(page, size));
     }
 
-    @PostMapping("/api/v1/users")
+    @PostMapping("")
     @ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<UserVo> createLocalUser(@Valid @RequestBody CreateLocalUserRequest request) {
         return ApiResponse.ok(userAccountService.createLocalUser(request));
     }
 
-    @PostMapping("/api/v1/users/{userId}/disable")
+    @PostMapping("/{userId}/disable")
     public ApiResponse<UserVo> disableUser(@PathVariable long userId) {
         return ApiResponse.ok(userAccountService.disableUser(userId));
     }
 
-    @PostMapping("/api/v1/users/{userId}/enable")
+    @PostMapping("/{userId}/enable")
     public ApiResponse<UserVo> enableUser(@PathVariable long userId) {
         return ApiResponse.ok(userAccountService.enableUser(userId));
     }
 
-    @PatchMapping("/api/v1/users/{userId}/org")
+    @PatchMapping("/{userId}/org")
     public ApiResponse<UserVo> updateUserOrg(@PathVariable long userId,
                                              @RequestBody UpdateUserOrgRequest request) {
         return ApiResponse.ok(userAccountService.updateUserOrg(userId, request.orgId()));
     }
 
-    @PutMapping("/api/v1/users/{userId}/roles")
+    @PutMapping("/{userId}/roles")
     public ApiResponse<UserVo> setRoles(@PathVariable long userId, @Valid @RequestBody RoleSetRequest request) {
         return ApiResponse.ok(userAccountService.setRoles(userId, request.roles()));
     }
 
-    @PostMapping("/api/v1/users/{userId}/reset-password")
+    @PostMapping("/{userId}/reset-password")
     public ResponseEntity<Void> resetPassword(@PathVariable long userId,
                                               @Valid @RequestBody ResetPasswordRequest request) {
         userAccountService.resetPassword(userId, request.newPassword());
         return ResponseEntity.noContent().build();
     }
 
-    @DeleteMapping("/api/v1/users/{userId}")
+    @DeleteMapping("/{userId}")
     public ResponseEntity<Void> removeFromTenant(@PathVariable long userId) {
         userAccountService.removeFromTenant(userId);
         return ResponseEntity.noContent().build();

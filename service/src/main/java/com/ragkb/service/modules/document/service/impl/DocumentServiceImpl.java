@@ -79,7 +79,7 @@ import java.util.stream.Collectors;
  *                                  事务写 document/document_version/parse_task/outbox →
  *                                  返回 SUCCEEDED 任务（resourceId=documentId 供前端回读）
  * </pre>
- * 原始字节只进对象存储（本地开发为 {@link com.ragkb.service.common.storage.LocalObjectStore}），
+ * 原始字节只进对象存储（本地开发为 {@link com.ragkb.service.modules.infrastructure.objectstore.LocalObjectStore}），
  * 数据库只存 {@code object_key + content_sha256}（不可逆摘要，DDL 注释边界）。
  *
  * <p>⚠️ 说明：

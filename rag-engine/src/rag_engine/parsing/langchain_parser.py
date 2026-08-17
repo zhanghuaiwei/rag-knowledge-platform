@@ -16,7 +16,7 @@ import io
 
 from rag_engine.parsing.models import ContentBlock, SourceLocation
 from rag_engine.parsing.ports import ParserProvider
-from rag_engine.providers.ports import ObjectStore
+from rag_engine.providers._provider_ports import ObjectStore
 
 # 当前支持解析的文本扩展名（与前端 accept 的子集，MVP 先覆盖 Markdown/TXT/CSV/HTML）。
 _TEXT_EXTS = {"md", "txt", "markdown", "csv", "html", "htm"}

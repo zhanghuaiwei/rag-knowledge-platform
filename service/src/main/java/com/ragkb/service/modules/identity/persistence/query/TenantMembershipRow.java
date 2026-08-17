@@ -1,4 +1,4 @@
-package com.ragkb.service.modules.identity.persistence.row;
+package com.ragkb.service.modules.identity.persistence.query;
 
 /**
  * {@code tenant_member} 关联 {@code sys_tenant} + {@code tenant_member_role} 的查询行。

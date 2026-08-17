@@ -6,6 +6,7 @@ import java.util.Map;
 
 
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -16,9 +17,10 @@ import org.springframework.web.bind.annotation.RestController;
  * 空调用链可用，并演示统一响应信封 {@link ApiResponse}。</p>
  */
 @RestController
+@RequestMapping("/api/v1")
 public class PingController {
 
-    @GetMapping("/api/v1/ping")
+    @GetMapping("/ping")
     public ApiResponse<Map<String, String>> ping() {
         return ApiResponse.ok(Map.of(
                 "service", "ragkb-service",

@@ -1,23 +1,23 @@
-"""不属于单一业务功能的基础设施端口。"""
+"""[已迁移] 适配器层端口定义已移至 :mod:`rag_engine.providers._provider_ports`。
 
-from typing import Protocol
+本文件保留为 thin re-export 兼容层，避免一次性破坏既有 import；
+新代码请直接从 ``rag_engine.providers._provider_ports`` 导入。
+"""
 
+import warnings
 
-class ObjectStore(Protocol):
-    """原始文档和派生预览的不可变对象存储端口。"""
+from rag_engine.providers._provider_ports import ObjectStore, SecretResolver
 
-    def get(self, object_key: str) -> bytes:
-        """读取对象内容；实现必须配置超时并映射 provider 错误。"""
-        ...
-
-    def head(self, object_key: str) -> bool:
-        """判断对象是否存在，不返回对象正文。"""
-        ...
+__all__ = ["ObjectStore", "SecretResolver"]
 
 
-class SecretResolver(Protocol):
-    """按 secret reference 获取短期凭证的端口。"""
+def _deprecated_re_export() -> None:
+    warnings.warn(
+        "rag_engine.providers.ports 已迁移到 rag_engine.providers._provider_ports，"
+        "请更新 import 路径。",
+        DeprecationWarning,
+        stacklevel=2,
+    )
 
-    def resolve(self, secret_ref: str) -> str:
-        """解析凭证；返回值不得落盘、记录日志或进入 API 响应。"""
-        ...
+
+_deprecated_re_export()

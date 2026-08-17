@@ -24,6 +24,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -35,6 +36,7 @@ import java.util.List;
  * 校验失败返回 403。
  */
 @RestController
+@RequestMapping("/api/v1/api-keys")
 @PreAuthorize("hasAuthority('api-key:manage')")
 public class ApiKeyController {
 
@@ -44,12 +46,12 @@ public class ApiKeyController {
         this.authService = authService;
     }
 
-    @GetMapping("/api/v1/api-keys")
+    @GetMapping("")
     public ApiResponse<List<ApiKeyVo>> listApiKeys() {
         return ApiResponse.ok(authService.listApiKeys());
     }
 
-    @PostMapping("/api/v1/api-keys")
+    @PostMapping("")
     @org.springframework.web.bind.annotation.ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<ApiKeyCreatedVo> createApiKey(
             @Valid @RequestBody ApiKeyCreateDto request,
@@ -57,7 +59,7 @@ public class ApiKeyController {
         return ApiResponse.ok(authService.createApiKey(request, idempotencyKey));
     }
 
-    @GetMapping("/api/v1/api-keys/{keyId}")
+    @GetMapping("/{keyId}")
     public ApiResponse<ApiKeyVo> getApiKey(@PathVariable long keyId) {
         return ApiResponse.ok(authService.listApiKeys().stream()
                 .filter(key -> key.id() == keyId)
@@ -65,13 +67,13 @@ public class ApiKeyController {
                 .orElseThrow(() -> new ApiException(ErrorCode.NOT_FOUND, "API Key 不存在")));
     }
 
-    @DeleteMapping("/api/v1/api-keys/{keyId}")
+    @DeleteMapping("/{keyId}")
     public ResponseEntity<Void> revokeApiKey(@PathVariable long keyId) {
         authService.revokeApiKey(keyId);
         return ResponseEntity.noContent().build();
     }
 
-    @PostMapping("/api/v1/api-keys/{keyId}/rotate")
+    @PostMapping("/{keyId}/rotate")
     @org.springframework.web.bind.annotation.ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<ApiKeyCreatedVo> rotateApiKey(
             @PathVariable long keyId,

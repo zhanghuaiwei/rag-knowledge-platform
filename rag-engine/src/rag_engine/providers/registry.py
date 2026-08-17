@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from rag_engine.generation.ports import LlmProvider
 from rag_engine.indexing.ports import EmbeddingProvider, SearchIndex
 from rag_engine.parsing.ports import ParserProvider
-from rag_engine.providers.ports import ObjectStore, SecretResolver
+from rag_engine.providers._provider_ports import ObjectStore, SecretResolver
 from rag_engine.rerank.ports import RerankerProvider
 from rag_engine.safety.ports import ContentSafetyProvider
 

@@ -97,6 +97,7 @@ def _build_real_registry(settings: Settings) -> ProviderRegistry:
         embedding=embedding,
         embedding_model=settings.embedding_model,
         min_score=settings.retrieval_min_score,
+        embedding_batch_size=settings.embedding_batch_size,
     )
     llm = OpenAiCompatibleLlm(
         base_url=settings.llm_base_url,

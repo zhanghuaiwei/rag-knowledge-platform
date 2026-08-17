@@ -1,4 +1,4 @@
-package com.ragkb.service.modules.identity.persistence.row;
+package com.ragkb.service.modules.identity.persistence.query;
 
 /**
  * 租户成员所属组织查询行（{@code sys_user_org} JOIN {@code sys_org}）。

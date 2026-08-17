@@ -1,4 +1,4 @@
-package com.ragkb.service.modules.identity.persistence.row;
+package com.ragkb.service.modules.identity.persistence.query;
 
 /**
  * 租户成员角色查询行（{@code tenant_member_role}）。

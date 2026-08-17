@@ -36,12 +36,16 @@ class PgVectorSearchIndex(SearchIndex):
         embedding: OpenAiCompatibleEmbedding,
         embedding_model: str,
         min_score: float = 0.30,
+        embedding_batch_size: int = 64,
     ) -> None:
         self._pool = ConnectionPool(conninfo=database_url, min_size=1, max_size=4, open=False)
         self._pool.open()
         self._embedding = embedding
         self._embedding_model = embedding_model
         self._min_score = min_score
+        if embedding_batch_size < 1:
+            raise ValueError("embedding_batch_size must be positive")
+        self._embedding_batch_size_setting = embedding_batch_size
 
     # ------------------------------------------------------------------
     # 摄取写入
@@ -186,28 +190,42 @@ class PgVectorSearchIndex(SearchIndex):
         return vectors
 
     def _embedding_batch_size(self) -> int:
-        """Embedding 批大小（与 Settings.embedding_batch_size 对齐，暂取固定 64）。"""
-        return 64
+        """Embedding 批大小，与 Settings.embedding_batch_size 注入一致。"""
+        return self._embedding_batch_size_setting
 
     def _load_kb_configs(self, chunks: list[RetrievedChunk]) -> dict[int, tuple[int, int]]:
-        """按 kb_id 解析 index_profile_id 与 policy_version（一次查库缓存）。"""
+        """按 kb_id 解析 index_profile_id 与 policy_version（一次查库缓存）。
+
+        多租户下每个 kb 属于固定 tenant，查询条件必须带上 chunk 中的真实 tenant_id
+        （不再硬编码 tenant=1 兜底），避免跨租户读到别的租户同名 kb 配置。
+        """
         kb_ids = sorted({chunk.kb_id for chunk in chunks})
+        kb_tenant_map: dict[int, int] = {chunk.kb_id: chunk.tenant_id for chunk in chunks}
         result: dict[int, tuple[int, int]] = {}
         with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
-                "SELECT id, index_profile_id, policy_version FROM kb WHERE id = ANY(%s)",
+                "SELECT id, tenant_id, index_profile_id, policy_version FROM kb WHERE id = ANY(%s)",
                 (kb_ids,),
             )
-            for kb_id, profile_id, policy_version in cur.fetchall():
+            for kb_id, tenant_id, profile_id, policy_version in cur.fetchall():
+                expected_tenant = kb_tenant_map.get(int(kb_id))
+                if expected_tenant is not None and int(tenant_id) != expected_tenant:
+                    raise ValueError(
+                        f"kb {kb_id} tenant mismatch: chunk expects {expected_tenant}, "
+                        f"db row has {tenant_id}"
+                    )
                 resolved_profile = int(profile_id) if profile_id is not None else 0
                 resolved = (resolved_profile, int(policy_version or 1))
                 result[int(kb_id)] = resolved
-            # 缺 profile 的 kb：回退到该租户第一个 index_profile（开发种子数据兜底）。
-            for kb_id, (profile_id, policy_version) in result.items():
+            # 缺 profile 的 kb：回退到该 kb 真实租户下第一个 index_profile。
+            for kb_id, (profile_id, policy_version) in list(result.items()):
                 if profile_id == 0:
+                    fallback_tenant = kb_tenant_map.get(kb_id)
+                    if fallback_tenant is None:
+                        continue
                     cur.execute(
                         "SELECT id FROM index_profile WHERE tenant_id = %s ORDER BY id LIMIT 1",
-                        (1,),
+                        (fallback_tenant,),
                     )
                     row = cur.fetchone()
                     if row:

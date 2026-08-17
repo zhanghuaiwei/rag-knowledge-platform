@@ -8,7 +8,7 @@ from rag_engine.api.dependencies import get_retrieval_service
 from rag_engine.retrieval.schemas import SearchRequest, SearchResultPage
 from rag_engine.retrieval.service import RetrievalService
 
-router = APIRouter(prefix="/api/query", tags=["query"])
+router = APIRouter(prefix="/api/query", tags=["search"])
 Retrieval = Annotated[RetrievalService, Depends(get_retrieval_service)]
 
 
