@@ -1,6 +1,6 @@
 # ragkb-web — 前端 / BFF
 
-> 通用企业知识库平台的 **Next.js 前端 / BFF**:管理、搜索、问答、治理与质量体验。产品化页面已按 **antd v5 + ECharts + G6 血缘** 落地,内置 **mock 数据层**(默认,可脱离后端完整演示)与 **真实 HTTP transport**(`NEXT_PUBLIC_USE_MOCK=false` 切换),两端点集与 `service` 接口骨架对齐。
+> 通用企业知识库平台的 **Next.js 前端 / BFF**:管理、搜索、问答、治理与质量体验。产品化页面已按 **antd v5 + ECharts + G6 血缘** 落地,统一走 **真实 HTTP transport**(与 `service` 接口骨架对齐)。
 
 - 权威设计:`../docs/02-概要设计.md`、`../docs/03-详细设计.md`
 - 契约:`../docs/api/server.openapi.yaml`
@@ -63,7 +63,6 @@ pnpm build
 
 | 变量 | 用途 | 开发默认值 |
 | --- | --- | --- |
-| `NEXT_PUBLIC_USE_MOCK` | `true` 使用内置 Mock，`false` 调真实 HTTP API | `true` |
 | `NEXT_PUBLIC_API_BASE_URL` | 全局后端地址（不含 API 前缀） | `http://localhost:8080` |
 | `NEXT_PUBLIC_API_PREFIX` | 全局 API 前缀 | `/api/v1` |
 | `NEXT_PUBLIC_MINIO_BASE_URL` | 浏览器可访问的 MinIO/对象存储地址 | `http://localhost:9000` |
@@ -107,6 +106,6 @@ pnpm test        # vitest run
 - [x] 主题与布局可配置(明暗、主题色、圆角、密度、内容宽度、侧边栏收起,localStorage 持久化)
 - [x] UI 全面迁移 antd v5 组件库(布局/菜单/表格/表单/弹窗/消息)并接入 G6 血缘可视化(`components/lineage-graph.tsx`)、ECharts 图表(趋势/环形/仪表盘)
 - [x] 企业级产品化补齐:写操作真实落地 mock 库(创建/克隆/成员/审核/收藏/删除/重试/回滚/API Key/Webhook/组织/标签)、角色门禁(管理员/治理角色路由守卫 + 导航过滤)、治理中心(元数据 schema/保留与法律保全/删除与证明)、文档 ACL 编辑器(可解释权限)、组织树 CRUD、问答知识库多选、搜索类型/日期/排序、MD/TXT 预览、用量日/周/月与 CSV 导出
-- [x] 真实 HTTP transport(axios):全部功能点 API 对接(`api-client/http/`),含信封解壳、统一错误归一化、异步任务轮询、问答 SSE 流式消费;mock/http 由 `NEXT_PUBLIC_USE_MOCK` 切换,`NEXT_PUBLIC_API_BASE_URL` 指定后端地址
-- [ ] OIDC Code + PKCE 登录、BFF 会话与 CSRF 防护(当前登录页为 mock 入口;后端会话端点已就绪,实现点见 `service/application` 桩)
+- [x] 真实 HTTP transport(axios):全部功能点 API 对接(`api-client/http/`),含信封解壳、统一错误归一化、异步任务轮询、问答 SSE 流式消费;固定走真实 HTTP,`NEXT_PUBLIC_API_BASE_URL` 指定后端地址
+- [ ] OIDC Code + PKCE 登录、BFF 会话与 CSRF 防护(当前登录走真实 HTTP,后端 form 登录端点就绪但实现待人工补齐;实现点见 `service/application` 桩)
 - [ ] Playwright E2E 与可访问性基线验证

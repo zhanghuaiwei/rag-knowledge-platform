@@ -1,8 +1,7 @@
 /**
  * 真实 HTTP transport：按域模块组合成统一 ApiClient 实现。
  *
- * 与 mock transport 形状完全一致（同属 ApiClient 接口）；由 client.ts 依据
- * `NEXT_PUBLIC_USE_MOCK` 切换。页面只依赖 api-client，不感知数据来源。
+ * 页面只依赖 api-client（client.ts 固定导出本实现），不感知请求细节。
  */
 import type { ApiClient } from "@/api-client/contracts";
 import { adminApi } from "@/api-client/http/admin";

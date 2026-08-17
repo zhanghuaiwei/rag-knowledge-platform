@@ -23,4 +23,13 @@ export interface DocumentApi {
   toggleFavorite(id: number): Promise<boolean>;
   listDocumentAcl(id: number): Promise<AclEntry[]>;
   setDocumentAcl(id: number, request: AclSetRequest): Promise<AclEntry[]>;
+  /**
+   * 预览文档：获取文件字节流并构造浏览器可用的 Blob URL（需 VIEW_CONTENT 权限）。
+   * 返回的 URL 用完后应调用 URL.revokeObjectURL 释放。
+   */
+  previewDocument(id: number): Promise<string>;
+  /**
+   * 下载文档：获取原始文件字节流并触发浏览器下载（需 DOWNLOAD_ORIGINAL 权限）。
+   */
+  downloadDocument(id: number, versionId?: number): Promise<void>;
 }

@@ -28,7 +28,6 @@ const apiPrefix = normalizePathPrefix(process.env.NEXT_PUBLIC_API_PREFIX, DEFAUL
 const minioBaseUrl = normalizeBaseUrl(process.env.NEXT_PUBLIC_MINIO_BASE_URL, DEFAULT_MINIO_BASE_URL);
 
 export const publicEnv = Object.freeze({
-  useMock: process.env.NEXT_PUBLIC_USE_MOCK !== "false",
   apiBaseUrl,
   apiPrefix,
   apiUrl: `${apiBaseUrl}${apiPrefix}`,

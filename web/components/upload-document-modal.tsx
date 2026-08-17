@@ -78,6 +78,7 @@ export function UploadDocumentModal({
         fileName: file.name,
         fileSize: file.size,
         sensitivity: values.sensitivity,
+        file, // 真实分片上传需文件字节；mock 传输层忽略该字段
       });
       toast("success", `「${doc.title}」已上传，进入解析队列`);
       onUploaded(doc);

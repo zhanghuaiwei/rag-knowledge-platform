@@ -139,7 +139,14 @@ export default function DocumentDetailPage() {
             icon={<DownloadOutlined />}
             disabled={!canDownload}
             title={canDownload ? undefined : "无 download_original 权限"}
-            onClick={() => toast("info", "mock：原始文件流下载（需 download_original）")}
+            onClick={async () => {
+              try {
+                await api.downloadDocument(docId);
+                toast("success", "下载已开始");
+              } catch (err: unknown) {
+                toast("error", err instanceof Error ? err.message : "下载失败");
+              }
+            }}
           >
             下载
           </Button>

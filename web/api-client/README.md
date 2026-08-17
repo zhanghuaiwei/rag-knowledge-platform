@@ -7,10 +7,9 @@
 ```text
 api-client/
 ├── index.ts        # 统一出口：api + 类型
-├── client.ts       # ApiClient 接口 + 按环境变量选择 transport
+├── client.ts       # 统一客户端实例（固定真实 HTTP transport）
 ├── contracts/      # 域契约接口（ApiClient = 10 域接口并集）
 ├── types/          # 契约类型（对齐前端产品契约 / OpenAPI）
-├── mock/           # mock transport：从 mocks/db 读取数据并模拟延迟
 └── http/           # 真实 HTTP transport（axios）
     ├── index.ts    # httpClient 组合
     ├── client.ts   # axios 实例 + 信封解壳 + 错误归一化 + 任务轮询
@@ -30,12 +29,12 @@ const page = await api.listKbs({ page: 1, size: 20 });
 const detail = await api.getDocument(id);
 ```
 
-## transport 切换
+## transport
 
-| 环境变量 | 行为 |
+web 端统一走真实 HTTP transport（`client.ts` 固定导出 `httpClient`，无 mock 开关）。
+
+| 环境变量 | 说明 |
 | --- | --- |
-| `NEXT_PUBLIC_USE_MOCK` 未设置或 `true` | 使用内置 mock 数据（无需后端） |
-| `NEXT_PUBLIC_USE_MOCK=false` | 使用真实 HTTP transport |
 | `NEXT_PUBLIC_API_BASE_URL` | 后端服务地址，不含 API 前缀 |
 | `NEXT_PUBLIC_API_PREFIX` | API 前缀，默认 `/api/v1` |
 | `NEXT_PUBLIC_MINIO_BASE_URL` | 浏览器可访问的 MinIO/对象存储地址 |
@@ -45,7 +44,6 @@ const detail = await api.getDocument(id);
 
 ```bash
 cp .env.development.example .env.development
-# 编辑 .env.development，将 NEXT_PUBLIC_USE_MOCK 改为 false 即可连接真实后端
 pnpm dev
 ```
 
@@ -53,7 +51,7 @@ pnpm dev
 API URL；对象路径可通过 `buildMinioUrl(path)` 拼接为浏览器可访问地址。HTTP 请求携带会话
 cookie（`withCredentials`），后端需开放 CORS 且 `allowCredentials`。
 
-> `NEXT_PUBLIC_*` 会在构建时写入浏览器产物，只能放公开地址和开关。MinIO access key、
+> `NEXT_PUBLIC_*` 会在构建时写入浏览器产物，只能放公开地址。MinIO access key、
 > secret key、bucket 凭证等必须由后端持有；预签名 URL 仍以服务端返回值为准。
 
 ## 真实 HTTP transport 约定
