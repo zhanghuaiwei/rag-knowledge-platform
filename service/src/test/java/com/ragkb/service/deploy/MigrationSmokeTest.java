@@ -36,8 +36,8 @@ class MigrationSmokeTest {
     void migrationSeedsBootstrapAdminIdempotently() throws IOException {
         String sql = readMigration();
         assertTrue(sql.contains("ON CONFLICT (id) DO NOTHING"), "sys_user 按 id 幂等");
-        assertTrue(sql.contains("ON CONFLICT ON CONSTRAINT uq_user_credential_username DO NOTHING"),
-                "user_credential 按登录标识幂等");
+        assertTrue(sql.contains("WHERE NOT EXISTS") && sql.contains("WHERE lower(username) = 'admin'"),
+                "user_credential 按登录标识（lower(username)）条件插入幂等");
         assertTrue(sql.contains("Bootstrap Admin"), "bootstrap 管理员存在");
         assertTrue(sql.contains("TENANT_ADMIN"), "bootstrap 角色为租户管理员");
     }

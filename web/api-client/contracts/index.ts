@@ -1,6 +1,6 @@
 /**
  * 域契约组合成统一 ApiClient 接口（与 OpenAPI 对齐）。
- * mock transport 与 http transport 都按本接口实现，页面只依赖 `api`。
+ * http transport 按本接口实现，页面只依赖 `api`。
  */
 import type { AuthApi } from "@/api-client/contracts/auth";
 import type { KbApi } from "@/api-client/contracts/kb";

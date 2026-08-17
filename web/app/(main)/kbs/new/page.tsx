@@ -27,13 +27,13 @@ interface WizardForm {
 const INITIAL: WizardForm = {
   name: "",
   description: "",
-  visibility: "PRIVATE",
-  owner: "张伟（当前用户）",
+  visibility: "PRIVATE",  // PRIVATE
+  owner: "", // 张伟（当前用户）
   domain: "",
-  sensitivity: "INTERNAL",
-  retention: "3 年",
-  dataRegion: "华东（上海）",
-  modelPolicy: "仅境内模型",
+  sensitivity: "", // INTERNAL
+  retention: "", // 3 年
+  dataRegion: "", // 华东（上海）
+  modelPolicy: "",  // 仅境内模型
   requiresReview: true,
   ocrEnabled: false,
 };
@@ -83,6 +83,7 @@ export default function NewKbPage() {
         modelPolicy: values.modelPolicy,
         requiresReview: values.requiresReview,
         ocrEnabled: values.ocrEnabled,
+        tenant_id: "1",
       });
       toast("success", `知识库「${values.name}」已创建`);
       router.push("/kbs");

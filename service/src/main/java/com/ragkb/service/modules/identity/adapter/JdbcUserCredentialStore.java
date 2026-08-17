@@ -32,6 +32,9 @@ public class JdbcUserCredentialStore implements UserCredentialStorePort {
         this.userCredentialMapper = userCredentialMapper;
     }
 
+    /**
+     * 认证的UserService对象,去查db
+     */
     @Override
     public Optional<CredentialRecord> findByUsername(String username) {
         // 唯一索引 lower(username) 保证大小写不敏感唯一；按输入精确匹配加载

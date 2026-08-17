@@ -10,4 +10,4 @@
   （02-概要设计 §4.1）；现状未动。
 - 登出：`POST /api/v1/auth/logout`（黑名单 access jti + 吊销 refresh 家族）+ 清本地内存 token。
 - 后端 JWT 签发/校验与 Redis 黑名单为人工实现点（`TokenService` / 两个 Adapter），实现完成前
-  form 模式登录返回 501/500，前端默认走 mock（`NEXT_PUBLIC_USE_MOCK`）。
+  form 模式登录返回 501/500；前端已移除 mock，统一走真实 HTTP（`NEXT_PUBLIC_API_BASE_URL`）。

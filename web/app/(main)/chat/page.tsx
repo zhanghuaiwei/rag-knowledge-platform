@@ -5,7 +5,7 @@ import { Suspense, useEffect, useRef, useState } from "react";
 import { Card, Drawer } from "antd";
 
 import { api } from "@/api-client";
-import type { ChatMessage, ChatSession, ChatStreamResult } from "@/api-client";
+import type { ChatMessage, ChatSession } from "@/api-client";
 import { Loading } from "@/components/async-state";
 import { ChatHeader } from "@/components/chat/chat-header";
 import { ChatInput } from "@/components/chat/chat-input";
@@ -13,7 +13,6 @@ import { ChatMessageList } from "@/components/chat/message-list";
 import { ScopePicker } from "@/components/chat/scope-picker";
 import { SessionList } from "@/components/chat/session-list";
 import type { DisplayMessage } from "@/components/chat/types";
-import { useMockStream } from "@/components/chat/use-mock-stream";
 import { ChatFeedbackModal } from "@/components/chat-feedback-modal";
 import { useToast } from "@/components/feedback";
 import { useAsync } from "@/lib/use-async";
@@ -34,6 +33,8 @@ function ChatPageInner() {
   const [feedbackNote, setFeedbackNote] = useState("");
   const [mobileSessionsOpen, setMobileSessionsOpen] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  // UI 级取消标记：transport 内部 SSE 聚合无暴露 abort，点击停止后丢弃待返回结果
+  const cancelledRef = useRef(false);
   // 从知识库详情「基于此库问答」带入的库范围（新会话生效）
   const scopeKbId = Number(searchParams.get("kb")) || null;
   // 新会话知识库范围（多选，最多 5 个；F2.1 用例步骤 3）
@@ -85,27 +86,32 @@ function ChatPageInner() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
   const activeSession: ChatSession | undefined = sessions.data?.items.find((s) => s.id === activeId);
-  const { streamAnswer, stopStreaming } = useMockStream(setMessages, () => setSending(false));
+  // UI 级停止：只复位发送态并标记丢弃待返回结果（真实 SSE 在 transport 内聚合，无页面级 abort）
+  const stopStreaming = () => {
+    cancelledRef.current = true;
+    setSending(false);
+    setMessages((prev) => prev.map((m) => (m.streaming ? { ...m, streaming: false } : m)));
+  };
   const send = async (raw?: string) => {
     const content = (raw ?? input).trim();
     if (!content || sending) return;
     setSending(true);
     setInput("");
+    cancelledRef.current = false;
 
     let sessionId = activeId;
     if (sessionId === null) {
-      // 新会话：按用户选择的知识库范围创建真实会话（mock 层持久化）
+      // 新会话：按用户选择的知识库范围创建真实会话；失败如实报错，不再降级为本地会话
       try {
         const created = await api.createChatSession({ kbIds: newScopeIds });
         sessionId = created.id;
         setActiveId(sessionId);
         setMessages([]);
         sessions.reload();
-      } catch {
-        // mock 创建失败时降级为本地会话
-        sessionId = Date.now();
-        setActiveId(sessionId);
-        setMessages([]);
+      } catch (err: unknown) {
+        setSending(false);
+        toast("error", err instanceof Error ? err.message : "创建会话失败，请重试");
+        return;
       }
     }
 
@@ -119,32 +125,37 @@ function ChatPageInner() {
         content,
         kbIds: activeSession?.kbIds ?? newScopeIds,
       });
+      if (cancelledRef.current) {
+        // 已点击停止：丢弃待返回结果
+        setMessages((prev) => prev.filter((m) => m.id !== placeholder.id));
+        return;
+      }
+      // transport 内已聚合完整 SSE（meta → token → sources → final），结果到达后一次性真实展示
       setMessages((prev) =>
         prev.map((m) =>
           m.id === placeholder.id
-            ? { ...m, id: result.messageId, answerStatus: result.answerStatus, confidence: result.confidence, feedback: 0 }
+            ? {
+                ...m,
+                id: result.messageId,
+                content: result.content,
+                streaming: false,
+                answerStatus: result.answerStatus,
+                confidence: result.confidence,
+                sources: result.sources,
+                suggestions: result.suggestions,
+                feedback: 0,
+              }
             : m,
         ),
       );
-      streamAnswer(result);
-    } catch {
-      // mock 层对本地新会话会 notFound：降级为本地演示回答
-      const fallback: ChatStreamResult = {
-        sessionId,
-        messageId: placeholder.id,
-        answerStatus: "ANSWERED",
-        confidence: 0.72,
-        content: `（mock 回答）已收到你的问题「${content}」。接入真实后端后，这里将基于授权范围内的知识库生成带引用的流式回答。`,
-        sources: [],
-        suggestions: ["换一个角度追问", "缩小知识库范围"],
-        tokenIn: 0,
-        tokenOut: 0,
-        cost: 0,
-      };
+    } catch (err: unknown) {
+      if (cancelledRef.current) return;
       setMessages((prev) =>
-        prev.map((m) => (m.id === placeholder.id ? { ...m, answerStatus: fallback.answerStatus, confidence: fallback.confidence, feedback: 0 } : m)),
+        prev.map((m) => (m.id === placeholder.id ? { ...m, content: "回答生成失败，请重试", streaming: false } : m)),
       );
-      streamAnswer(fallback);
+      toast("error", err instanceof Error ? err.message : "回答生成失败");
+    } finally {
+      if (!cancelledRef.current) setSending(false);
     }
   };
   const newSession = () => {

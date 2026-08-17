@@ -14,12 +14,12 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="zh-CN">
+    <html lang="zh-CN" suppressHydrationWarning>
       <head>
         {/* 预水合还原主题，避免暗色/自定义主题首帧闪烁 */}
         <script dangerouslySetInnerHTML={{ __html: buildThemeInitScript() }} />
       </head>
-      <body>
+      <body suppressHydrationWarning>
         <AntdRegistry>
           <ThemeProvider>
             <AntdProvider>{children}</AntdProvider>

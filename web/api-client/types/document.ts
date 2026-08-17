@@ -68,13 +68,31 @@ export interface DocumentListParams extends PageParams {
   tagId?: number;
 }
 
-/** 文档上传请求：真实实现为分片上传 + 安全扫描（GKB-03），此处为最小字段集。 */
+/** 文档上传请求：真实实现为分片上传 + 安全扫描（GKB-03）。 */
 export interface UploadDocumentInput {
   kbId: number;
   title: string;
   fileName: string;
   fileSize: number;
   sensitivity: Sensitivity;
+  /** 文件字节（File 即 Blob）：http 传输层按 partSize 切片直传，mock 传输层忽略。 */
+  file: Blob;
+}
+
+/**
+ * POST /upload/init 响应（分片会话信息）。
+ *
+ * - `partSize = 0`：直传（单分片 = 整个文件，≤8MB 阈值由服务端决定）
+ * - `partSize > 0`：按该字节数分片，共 `partCount` 片；同号重复 PUT 覆盖 = 幂等续传
+ * - `uploadedParts`：已上传分片号（幂等键命中同文件续传时非空）
+ * - `presignedPutUrls`：当前直传实现为 null（预留 S3 预签名直传）
+ */
+export interface UploadInitResponse {
+  uploadId: string;
+  partSize: number;
+  partCount: number;
+  uploadedParts: number[];
+  presignedPutUrls: string[] | null;
 }
 
 /** 文档元数据可编辑字段（租户 schema 驱动，最小子集）。 */

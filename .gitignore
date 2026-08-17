@@ -2,10 +2,12 @@
 .env
 .env.*
 !.env.example
+!.env.*.example
 *.pem
 *.key
 *.p12
 *.jks
+ignore/
 secrets/
 credentials.json
 
