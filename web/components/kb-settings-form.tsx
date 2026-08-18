@@ -7,7 +7,7 @@ import { api } from "@/api-client";
 import type { Kb } from "@/api-client";
 import { useToast } from "@/components/feedback";
 
-/** 知识库基本设置表单（antd Form）：受控，保存走 updateKb 契约（mock 下直接写内存库）。 */
+/** 知识库基本设置表单（antd Form）：受控，保存经 PATCH /kbs/{id} 真实落库。 */
 export function KbSettingsForm({ kb, canEdit, onSaved }: { kb: Kb; canEdit: boolean; onSaved: () => void }) {
   const toast = useToast();
   const [form] = Form.useForm<{ name: string; description: string; requiresReview: boolean }>();

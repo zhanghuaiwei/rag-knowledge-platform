@@ -20,8 +20,8 @@ const axisBase = {
 } as const;
 
 /**
- * 数据大屏（mock 演示）：全屏暗色运营视图。
- * 指标口径与 analytics 页一致；真实环境由租户级指标接口驱动（GKB-08，契约待冻结）。
+ * 数据大屏：全屏暗色运营视图，全部指标来自真实 analytics / audit / documents 接口。
+ * 指标口径与 analytics 页一致；SLO 语义以 GKB-08 定义为准（契约待冻结）。
  */
 export default function ScreenPage() {
   const [now, setNow] = useState(() => new Date());
@@ -195,7 +195,7 @@ export default function ScreenPage() {
         ].map((kpi) => (
           <div key={kpi.label} className="screen-panel screen-kpi">
             <div className="screen-kpi-value">{kpi.value}</div>
-            <div className="screen-kpi-label">{kpi.label}（mock）</div>
+            <div className="screen-kpi-label">{kpi.label}</div>
           </div>
         ))}
       </div>
@@ -245,7 +245,7 @@ export default function ScreenPage() {
       </div>
 
       <p style={{ textAlign: "center", color: "#4d5f80", fontSize: 12, marginTop: 16 }}>
-        数据每 30 秒自动刷新 · 当前为 mock 演示数据，指标口径以 GKB-08 SLO 定义为准
+        数据每 30 秒自动刷新 · 指标口径以 GKB-08 SLO 定义为准
       </p>
     </div>
   );

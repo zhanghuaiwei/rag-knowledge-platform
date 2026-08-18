@@ -21,32 +21,23 @@
 ```text
 web/
 ├── app/                     # App Router 页面与 API 路由
-│   ├── api/health/          # 探针端点(脚手架阶段)
-│   ├── layout.tsx
-│   └── page.tsx
+│   ├── (main)/              # 登录后主框架(工作台/问答/搜索/知识库/文档/治理/分析/管理中心)
+│   ├── api/health/          # 探针端点(返回当前 phase)
+│   ├── login/               # 登录页
+│   └── screen/              # 运营数据大屏(全屏暗色)
 ├── api-client/              # 前端 API 层(组件中禁止直接 fetch)
-│   ├── types.ts             # 契约类型
-│   ├── client.ts            # 客户端(自动选择 mock / http transport)
-│   ├── http/                # 真实 HTTP transport(接入后端后使用)
-│   └── mock/                # mock transport 实现
-├── mocks/                   # 完整 mock 数据集与内存数据库
-├── components/              # 跨 feature 复用组件(占位)
-├── features/                # 业务功能模块(占位)
+│   ├── contracts/           # 各域接口契约(与 OpenAPI 对齐)
+│   ├── http/                # 唯一的真实 HTTP transport(axios,无 mock 开关)
+│   └── types/               # 契约类型(按域拆分)
+├── components/              # 跨页面复用组件(布局/异步状态/图表/上传/任务中心等)
+├── config/                  # 环境变量读取(config/env.ts)
+├── lib/                     # 纯工具(格式化/权限/主题/CSV/useAsync)
 └── (next.config.ts / tsconfig.json / vitest.config.ts)
 ```
 
-## Mock 数据
+前端**固定走真实 HTTP transport**(`api-client/client.ts` 固定导出 `httpClient`),没有 mock 数据层与切换开关;页面数据均来自 `service` 后端(部署与启动见仓库根 README / `deploy/`)。
 
-前端内置一套与 v0.2 数据库设计(`../deploy/ddl/init.sql`)和 API 契约(`../docs/07-API契约.md`)对齐的**完整 mock 数据**,覆盖:
-
-- 知识库(KB)与成员角色
-- 文档、版本与解析状态
-- 搜索/问答、SSE 流式会话与引用
-- 用量统计、成本、Top 文档、DAU
-- 用户、组织、审计日志、审核队列、标签、收藏
-- API Key、Webhook、连接器
-
-### 环境配置与 Mock 切换
+### 环境配置
 
 Next.js 根据命令自动加载环境文件：`pnpm dev` 使用 `.env.development`，生产构建使用
 `.env.production`，`.env.local` 可作为本机最高优先级覆盖。仓库提供不含密钥的模板：
@@ -100,12 +91,14 @@ pnpm test        # vitest run
 
 ## 当前状态与后续
 
-- [x] Next.js 工程、lint/typecheck/test 命令、`/api/health` 探针
-- [x] 完整 mock 数据层(脱离后端可演示)
-- [x] 产品化页面(mock 演示):工作台、问答(模拟流式)、搜索、知识库(列表/向导/详情)、文档库/详情、治理审核、质量用量、管理中心(成员/API Key/Webhook/审计)、登录页;设计见 `../docs/modules/enterprise-generalization/design/web-product-design.md`
+- [x] Next.js 工程、lint/typecheck/test 命令、`/api/health` 探针(返回 `phase: "mvp"`)
+- [x] 产品化页面:工作台、问答(SSE 流式)、搜索、知识库(列表/向导/详情/连接器手动同步)、文档库/详情、治理审核、质量用量、管理中心(成员/API Key/Webhook/审计)、登录页、运营数据大屏;设计见 `../docs/modules/enterprise-generalization/design/web-product-design.md`
 - [x] 主题与布局可配置(明暗、主题色、圆角、密度、内容宽度、侧边栏收起,localStorage 持久化)
 - [x] UI 全面迁移 antd v5 组件库(布局/菜单/表格/表单/弹窗/消息)并接入 G6 血缘可视化(`components/lineage-graph.tsx`)、ECharts 图表(趋势/环形/仪表盘)
-- [x] 企业级产品化补齐:写操作真实落地 mock 库(创建/克隆/成员/审核/收藏/删除/重试/回滚/API Key/Webhook/组织/标签)、角色门禁(管理员/治理角色路由守卫 + 导航过滤)、治理中心(元数据 schema/保留与法律保全/删除与证明)、文档 ACL 编辑器(可解释权限)、组织树 CRUD、问答知识库多选、搜索类型/日期/排序、MD/TXT 预览、用量日/周/月与 CSV 导出
+- [x] 企业级产品化补齐:写操作真实落库(创建/克隆/成员/审核/收藏/删除/重试/回滚/API Key/Webhook/组织/标签)、角色门禁(管理员/治理角色路由守卫 + 导航过滤)、治理中心(元数据 schema/保留与法律保全/删除与证明)、文档 ACL 编辑器(可解释权限)、组织树 CRUD、问答知识库多选、搜索类型/日期/排序、MD/TXT/PDF/图片预览、用量日/周/月与 CSV 导出、连接器手动同步与任务详情
 - [x] 真实 HTTP transport(axios):全部功能点 API 对接(`api-client/http/`),含信封解壳、统一错误归一化、异步任务轮询、问答 SSE 流式消费;固定走真实 HTTP,`NEXT_PUBLIC_API_BASE_URL` 指定后端地址
+- [ ] 租户配额接口(GKB-08 契约冻结后替换分析页配额占位卡片)
+- [ ] 审计日志导出(需权限校验与脱敏契约;后端 `/analytics/export` 暂无 audit 类别)
+- [ ] 文档血缘图真实数据源(当前由文档详情推导的示意数据,见 `docs/modules/web/README.md` 遗留缺口)
 - [ ] OIDC Code + PKCE 登录、BFF 会话与 CSRF 防护(当前登录走真实 HTTP,后端 form 登录端点就绪但实现待人工补齐;实现点见 `service/application` 桩)
 - [ ] Playwright E2E 与可访问性基线验证

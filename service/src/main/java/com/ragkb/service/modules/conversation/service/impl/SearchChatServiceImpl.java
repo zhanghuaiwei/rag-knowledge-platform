@@ -10,7 +10,9 @@ import com.ragkb.service.common.api.PageData;
 import com.ragkb.service.common.exception.ApiException;
 import com.ragkb.service.common.exception.ErrorCode;
 import com.ragkb.service.common.model.TenantId;
+import com.ragkb.service.common.model.UserId;
 import com.ragkb.service.common.security.SecurityUtils;
+import com.ragkb.service.modules.access.service.AccessPolicyUseCase;
 import com.ragkb.service.modules.conversation.dto.ChatAskDto;
 import com.ragkb.service.modules.conversation.dto.ChatSessionCreateDto;
 import com.ragkb.service.modules.conversation.dto.FeedbackDto;
@@ -29,8 +31,8 @@ import com.ragkb.service.modules.conversation.vo.ChatSessionVo;
 import com.ragkb.service.modules.conversation.vo.ChatSourceVo;
 import com.ragkb.service.modules.document.service.DocumentService;
 import com.ragkb.service.modules.identity.service.TokenService;
+import com.ragkb.service.modules.knowledge.service.KbService;
 import com.ragkb.service.modules.rag.port.RagEnginePort;
-import com.ragkb.service.util.TodoSupport;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -81,6 +83,8 @@ public class SearchChatServiceImpl implements SearchChatService {
     private final DocumentService documentService;
     private final RagEnginePort ragEnginePort;
     private final ObjectMapper objectMapper;
+    private final KbService kbService;
+    private final AccessPolicyUseCase accessPolicy;
 
     public SearchChatServiceImpl(ChatSessionMapper chatSessionMapper,
                                  ChatSessionKbMapper chatSessionKbMapper,
@@ -88,7 +92,9 @@ public class SearchChatServiceImpl implements SearchChatService {
                                  ChatMessageSourceMapper chatMessageSourceMapper,
                                  DocumentService documentService,
                                  RagEnginePort ragEnginePort,
-                                 ObjectMapper objectMapper) {
+                                 ObjectMapper objectMapper,
+                                 KbService kbService,
+                                 AccessPolicyUseCase accessPolicy) {
         this.chatSessionMapper = chatSessionMapper;
         this.chatSessionKbMapper = chatSessionKbMapper;
         this.chatMessageMapper = chatMessageMapper;
@@ -96,6 +102,8 @@ public class SearchChatServiceImpl implements SearchChatService {
         this.documentService = documentService;
         this.ragEnginePort = ragEnginePort;
         this.objectMapper = objectMapper;
+        this.kbService = kbService;
+        this.accessPolicy = accessPolicy;
     }
 
     // =====================================================================
@@ -302,15 +310,126 @@ public class SearchChatServiceImpl implements SearchChatService {
         return result;
     }
 
+    // =====================================================================
+    // 全文搜索（web → Java → rag-engine → pgvector）
+    // =====================================================================
+
     @Override
+    @SuppressWarnings("unchecked") // Python items 反序列化为 Map<String, Object>（与 extractSources 同一模式）
     public CursorPageData<?> search(String keyword, List<Long> kbIds, List<String> fileExts,
                                     String dateFrom, String dateTo, String cursor, int size) {
-        return TodoSupport.notImplemented("SearchChatService#search");
+        // ① 认证与租户上下文（fail-closed：未认证/无租户直接拒绝，绝不静默兜底）。
+        long tenantId = requireTenantId();
+        Long userId = currentUserId();
+        // ② kb 级权限过滤：显式传入的 kbIds 必须存在且属于当前租户（deny-by-default）。
+        List<Long> authorizedKbIds = authorizeKbIds(kbIds, tenantId);
+
+        // ③ cursor → page 换算：cursor 即页码字符串（不透明 token 的最小实现；
+        //    篡改 cursor 只会跳页，不会越权——租户/kb 过滤每次请求都重新校验）。
+        int page = parseCursorToPage(cursor);
+
+        // ④ 组装 rag-engine 检索请求（camelCase 对齐 Python ApiModel 别名）。
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("requestId", UUID.randomUUID().toString());
+        payload.put("keyword", keyword);
+        // 未传 kbIds 时为空列表：Python 侧仅按 tenant_id 过滤，等价于「当前租户全部库」
+        // （kb 成员级过滤为已知限制，与 listKbs/listDocuments 现状一致）。
+        payload.put("kbIds", authorizedKbIds);
+        payload.put("docIdWhitelist", List.of());
+        payload.put("types", fileExts == null ? List.of() : fileExts);
+        payload.put("dateFrom", dateFrom);
+        payload.put("dateTo", dateTo);
+        payload.put("vectorFusion", true); // 固定开启：词项覆盖融合优先关键词命中
+        payload.put("page", page);
+        payload.put("size", size);
+        Map<String, Object> result = ragEnginePort.search(new TenantId(tenantId), payload);
+
+        // ⑤ 解析命中并做 view_excerpt 二次授权（搜索结果仅包含有权查看摘要的内容；
+        //    未认证/dev 场景无 userId 时放行，与预览/下载链路的既有约定一致）。
+        List<Map<String, Object>> items = new ArrayList<>();
+        if (result.get("items") instanceof List<?> rawItems) {
+            for (Object raw : rawItems) {
+                if (!(raw instanceof Map<?, ?> map)) {
+                    continue;
+                }
+                Map<String, Object> item = new LinkedHashMap<>((Map<String, Object>) map);
+                if (userId != null && userId > 0
+                        && item.get("documentId") instanceof Number documentId
+                        && !accessPolicy.canViewExcerpt(
+                                new TenantId(tenantId), new UserId(userId), documentId.longValue())) {
+                    continue; // 无 VIEW_EXCERPT 权限的命中直接剔除（不泄露摘要）。
+                }
+                items.add(item);
+            }
+        }
+        boolean hasMore = result.get("hasMore") instanceof Boolean more && more;
+        // nextCursor 用页码 +1 编码；无更多页时置 null 终止翻页。
+        String nextCursor = hasMore ? String.valueOf(page + 1) : null;
+        return CursorPageData.of(items, nextCursor, hasMore);
     }
 
     @Override
     public Object getSearchExcerpt(String hitId) {
-        return TodoSupport.notImplemented("SearchChatService#getSearchExcerpt");
+        // ① 认证与租户上下文（fail-closed）。
+        long tenantId = requireTenantId();
+        Long userId = currentUserId();
+        // ② hitId 即 chunkId：按 id 直查分块正文（避免「重新检索定位」在深翻页丢命中）。
+        Map<String, Object> chunk = ragEnginePort.getChunk(new TenantId(tenantId), hitId);
+        if (!(chunk.get("documentId") instanceof Number documentId)) {
+            // 跨租户/不存在的命中统一按 404 拒绝（deny-by-default，不泄露存在性）。
+            throw new ApiException(ErrorCode.NOT_FOUND, "搜索命中不存在");
+        }
+        // ③ 文档存在性 + 租户归属校验（requireDocument deny-by-default）。
+        documentService.getDocument(documentId.longValue());
+        // ④ 摘录权限：VIEW_EXCERPT（策略层统一判定；未认证/dev 场景放行，同搜索链路约定）。
+        if (userId != null && userId > 0 && !accessPolicy.canViewExcerpt(
+                new TenantId(tenantId), new UserId(userId), documentId.longValue())) {
+            throw new ApiException(ErrorCode.FORBIDDEN, "无摘要查看权限（需要 VIEW_EXCERPT）");
+        }
+        // ⑤ 组装摘录 VO（camelCase 对齐前端 SearchHit 契约）。
+        Map<String, Object> excerpt = new LinkedHashMap<>();
+        excerpt.put("hitId", hitId);
+        excerpt.put("documentId", documentId.longValue());
+        excerpt.put("versionId", chunk.get("versionId"));
+        excerpt.put("fileName", chunk.get("fileName"));
+        excerpt.put("fileExt", chunk.get("fileExt"));
+        excerpt.put("pageNo", chunk.get("pageNo"));
+        excerpt.put("sectionTitle", chunk.get("sectionTitle"));
+        excerpt.put("text", chunk.get("text"));
+        return excerpt;
+    }
+
+    /** 校验请求的 kbIds 全部存在且属于当前租户（fail-closed），返回原样合法 id 列表。 */
+    private List<Long> authorizeKbIds(List<Long> kbIds, long tenantId) {
+        if (kbIds == null || kbIds.isEmpty()) {
+            return List.of();
+        }
+        List<Long> authorized = new ArrayList<>();
+        for (Long kbId : kbIds) {
+            // kbBrief：不存在抛 NOT_FOUND；再比对租户归属（跨租户 → FORBIDDEN）。
+            KbService.KbBrief brief = kbService.kbBrief(kbId);
+            if (brief.tenantId() > 0 && brief.tenantId() != tenantId) {
+                throw new ApiException(ErrorCode.FORBIDDEN, "无权访问该知识库");
+            }
+            authorized.add(brief.id());
+        }
+        return authorized;
+    }
+
+    /** cursor（页码字符串）→ page；空/缺省为第 1 页，非法值直接拒绝。 */
+    private int parseCursorToPage(String cursor) {
+        if (cursor == null || cursor.isBlank()) {
+            return 1;
+        }
+        try {
+            int page = Integer.parseInt(cursor.trim());
+            if (page < 1) {
+                throw new NumberFormatException("page must be >= 1");
+            }
+            return page;
+        } catch (NumberFormatException e) {
+            throw new ApiException(ErrorCode.BAD_REQUEST, "非法的分页游标: " + cursor);
+        }
     }
 
     // =====================================================================

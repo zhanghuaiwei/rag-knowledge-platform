@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ragkb.service.modules.integration.persistence.mapper.WebhookDeliveryQueueMapper">
+
+    <!--
+        Webhook 投递引擎专属 SQL：outbox 认领 / 订阅匹配 / 投递登记与状态回写。
+        全部手写 tenant_id + del_flag = 0 过滤（@TableLogic 只作用于 BaseMapper 生成 CRUD）。
+        webhook_subscription / webhook_delivery 实体属 admin 模块，此处按 identity 模块
+        UserAccountMapper 的先例以 SQL 直连（跨模块不建 Java 依赖）。
+    -->
+
+    <!-- 认领到期 outbox 事件：NEW/FAILED 且已到可投递时间，按 id 升序（FIFO），走 idx_outbox_dispatch。 -->
+    <select id="listDueOutboxEvents" resultType="com.ragkb.service.modules.integration.persistence.entity.OutboxEvent">
+        SELECT id, tenant_id, event_id, aggregate_type, aggregate_id, aggregate_version,
+               event_type, topic, payload, status, attempt_count, available_at, occurred_at
+        FROM outbox_event
+        WHERE status IN ('NEW', 'FAILED')
+          AND available_at &lt;= now()
+          AND del_flag = 0
+        ORDER BY id ASC
+        LIMIT #{limit}
+    </select>
+
+    <!--
+        事件匹配订阅：event_types JSONB 数组包含匹配（@> 单元素数组）。
+        用 @> CAST(... AS jsonb) 而非 jsonb ? 操作符：后者与 JDBC PreparedStatement 的
+        ? 占位符存在转义歧义（PostgreSQL 已知问题）。
+    -->
+    <select id="findActiveSubscribers" resultType="com.ragkb.service.modules.integration.persistence.query.WebhookTargetRow">
+        SELECT id, tenant_id, target_url, secret_ref
+        FROM webhook_subscription
+        WHERE tenant_id = #{tenantId}
+          AND status = 'ACTIVE'
+          AND del_flag = 0
+          AND event_types @> CAST(#{eventTypeJson} AS jsonb)
+    </select>
+
+    <!--
+        幂等登记投递记录：uq_webhook_delivery_event (tenant_id, subscription_id, event_id)
+        冲突时忽略（at-least-once：重复认领同一事件不会产生重复投递行）。
+        状态/次数/时间列显式落值，其余审计列由数据库默认值兜底。
+    -->
+    <insert id="insertDeliveryIgnoreConflict">
+        INSERT INTO webhook_delivery (tenant_id, subscription_id, event_id, status, attempt_count, next_attempt_at)
+        VALUES (#{tenantId}, #{subscriptionId}, #{eventId}, 'PENDING', 0, now())
+        ON CONFLICT ON CONSTRAINT uq_webhook_delivery_event DO NOTHING
+    </insert>
+
+    <!--
+        到期投递富行：PENDING/RETRY 且到达 next_attempt_at，JOIN 订阅取签名材料、
+        JOIN outbox 取事件元数据与载荷；任一关联行被清理（订阅软删过滤/事件删除）则该投递不再执行
+        （行本身保留为终态证据，由死信/重放流程人工处理）。
+    -->
+    <select id="findDueDeliveries" resultType="com.ragkb.service.modules.integration.persistence.query.WebhookDeliveryTargetRow">
+        SELECT d.id              AS id,
+               d.tenant_id       AS tenantId,
+               d.subscription_id AS subscriptionId,
+               d.event_id        AS eventId,
+               d.status          AS status,
+               d.attempt_count   AS attemptCount,
+               s.target_url      AS targetUrl,
+               s.secret_ref      AS secretRef,
+               CAST(o.event_id AS text) AS outboxEventUuid,
+               o.event_type      AS eventType,
+               CAST(o.payload AS text) AS payload,
+               d.create_time     AS createTime
+        FROM webhook_delivery d
+        JOIN webhook_subscription s
+          ON s.tenant_id = d.tenant_id AND s.id = d.subscription_id AND s.del_flag = 0
+        JOIN outbox_event o
+          ON o.tenant_id = d.tenant_id AND o.id = d.event_id AND o.del_flag = 0
+        WHERE d.status IN ('PENDING', 'RETRY')
+          AND d.next_attempt_at &lt;= now()
+          AND d.del_flag = 0
+        ORDER BY d.id ASC
+        LIMIT #{limit}
+    </select>
+
+    <!-- 单条投递富行（手动投递/死信重放的上下文读取）。 -->
+    <select id="findDeliveryDetail" resultType="com.ragkb.service.modules.integration.persistence.query.WebhookDeliveryTargetRow">
+        SELECT d.id              AS id,
+               d.tenant_id       AS tenantId,
+               d.subscription_id AS subscriptionId,
+               d.event_id        AS eventId,
+               d.status          AS status,
+               d.attempt_count   AS attemptCount,
+               s.target_url      AS targetUrl,
+               s.secret_ref      AS secretRef,
+               CAST(o.event_id AS text) AS outboxEventUuid,
+               o.event_type      AS eventType,
+               CAST(o.payload AS text) AS payload,
+               d.create_time     AS createTime
+        FROM webhook_delivery d
+        JOIN webhook_subscription s
+          ON s.tenant_id = d.tenant_id AND s.id = d.subscription_id AND s.del_flag = 0
+        JOIN outbox_event o
+          ON o.tenant_id = d.tenant_id AND o.id = d.event_id AND o.del_flag = 0
+        WHERE d.id = #{deliveryId}
+          AND d.del_flag = 0
+    </select>
+
+    <!-- 按唯一键反查投递主键（手动投递登记后定位行；不限定状态，终态行也返回供直接重投）。 -->
+    <select id="findDeliveryIdByUniqueKey" resultType="java.lang.Long">
+        SELECT id
+        FROM webhook_delivery
+        WHERE tenant_id = #{tenantId}
+          AND subscription_id = #{subscriptionId}
+          AND event_id = #{eventId}
+          AND del_flag = 0
+    </select>
+
+    <!-- 投递结果回写：终态三选一（SUCCEEDED/RETRY/DEAD），nextAttemptAt/deliveredAt 按状态置空或赋值。 -->
+    <update id="updateDeliveryOutcome">
+        UPDATE webhook_delivery
+        SET status           = #{status},
+            http_status      = #{httpStatus},
+            response_sha256  = #{responseSha256},
+            last_error_code  = #{lastErrorCode},
+            attempt_count    = #{attemptCount},
+            next_attempt_at  = #{nextAttemptAt},
+            delivered_at     = #{deliveredAt},
+            update_time      = now()
+        WHERE id = #{id}
+          AND del_flag = 0
+    </update>
+
+    <!-- 死信重放重置：回到 PENDING、尝试次数清零、立即可投（重放是人工决策，不再退避）。 -->
+    <update id="resetDeliveryForReplay">
+        UPDATE webhook_delivery
+        SET status          = 'PENDING',
+            attempt_count   = 0,
+            next_attempt_at = now(),
+            last_error_code = NULL,
+            update_time     = now()
+        WHERE id = #{deliveryId}
+          AND del_flag = 0
+    </update>
+
+    <!-- outbox 事件发布完成：fan-out 结束（含无订阅匹配）即置 PUBLISHED。 -->
+    <update id="markOutboxPublished">
+        UPDATE outbox_event
+        SET status       = 'PUBLISHED',
+            published_at = #{publishedAt},
+            update_time  = now()
+        WHERE id = #{id}
+          AND del_flag = 0
+    </update>
+
+    <!-- outbox 事件处理退避：失败计数 +1；dead=true 时置 DEAD（不再被认领），否则推迟 available_at 后仍可重试。 -->
+    <update id="bumpOutboxAttempt">
+        UPDATE outbox_event
+        SET status          = CASE WHEN #{dead} THEN 'DEAD' ELSE status END,
+            attempt_count   = attempt_count + 1,
+            last_error_code = #{errorCode},
+            available_at    = #{availableAt},
+            dead_letter_at  = CASE WHEN #{dead} THEN now() ELSE dead_letter_at END,
+            update_time     = now()
+        WHERE id = #{id}
+          AND del_flag = 0
+    </update>
+
+</mapper>

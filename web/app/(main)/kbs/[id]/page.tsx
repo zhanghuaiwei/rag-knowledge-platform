@@ -7,7 +7,8 @@ import type { TableColumnsType } from "antd";
 import { CopyOutlined, MessageOutlined, ReloadOutlined, UploadOutlined } from "@ant-design/icons";
 
 import { api } from "@/api-client";
-import type { Connector, DocumentSummary } from "@/api-client";
+import type { Connector, DocumentSummary, SyncJob } from "@/api-client";
+import { ApiError } from "@/api-client/http/errors";
 import { Empty, ErrorState, Loading, SkeletonRows } from "@/components/async-state";
 import { useToast } from "@/components/feedback";
 import { MemberManager } from "@/components/kb/member-manager";
@@ -17,6 +18,16 @@ import { formatDate, formatDateTime, formatNumber, formatRelative, statusText } 
 import { useAsync } from "@/lib/use-async";
 
 type TabKey = "overview" | "documents" | "members" | "connectors" | "settings";
+
+/** 同步任务状态中文标签（对齐后端 sync_job 状态机：QUEUED/RUNNING/SUCCEEDED/PARTIAL/FAILED/CANCELLED）。 */
+const SYNC_JOB_STATUS_TEXT: Record<string, string> = {
+  QUEUED: "排队中",
+  RUNNING: "执行中",
+  SUCCEEDED: "成功",
+  PARTIAL: "部分成功",
+  FAILED: "失败",
+  CANCELLED: "已取消",
+};
 
 const docColumns: TableColumnsType<DocumentSummary> = [
   {
@@ -89,6 +100,62 @@ export default function KbDetailPage() {
     } finally {
       setCloning(false);
     }
+  };
+
+  // 连接器同步：正在触发同步的连接器 id（按钮 loading 态）
+  const [syncingId, setSyncingId] = useState<number | null>(null);
+  // 最近一次同步任务详情（「任务详情」弹窗的数据源）
+  const [syncJob, setSyncJob] = useState<SyncJob | null>(null);
+  // 任务详情弹窗开关
+  const [jobDetailOpen, setJobDetailOpen] = useState(false);
+
+  /** 轮询同步任务直到终态（QUEUED/RUNNING 之外均为终态）；超时抛 ApiError 提示去任务中心查看。 */
+  const pollSyncJob = async (jobId: number, timeoutMs = 8000): Promise<SyncJob> => {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      // eslint-disable-next-line no-await-in-loop
+      const job = await api.getSyncJob(jobId);
+      if (job.status !== "QUEUED" && job.status !== "RUNNING") return job;
+      if (Date.now() >= deadline) {
+        throw new ApiError("同步任务执行超时，请稍后在任务中心查看进度", { code: "E-TASK-TIMEOUT" });
+      }
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+  };
+
+  /** 触发连接器手动同步：202 受理后按返回任务 resourceId 轮询 /sync-jobs/{jobId} 跟踪执行状态。 */
+  const syncNow = async (connector: Connector) => {
+    setSyncingId(connector.id);
+    try {
+      const task = await api.syncConnector(connector.id, { syncType: "INCREMENTAL" });
+      toast("success", `「${connector.name}」同步任务已受理，正在跟踪执行状态…`);
+      const jobId = Number(task.resourceId);
+      // resourceId 即同步任务 id；解析异常时仅提示受理成功，不再轮询
+      if (!Number.isFinite(jobId) || jobId <= 0) return;
+      const finished = await pollSyncJob(jobId);
+      setSyncJob(finished);
+      if (finished.status === "SUCCEEDED" || finished.status === "PARTIAL") {
+        // PARTIAL 表示部分对象同步失败：toast 仅支持 success/error/info，用 info 级别并在文案中带出失败数
+        toast(finished.status === "PARTIAL" ? "info" : "success", `同步完成：发现 ${finished.discovered} 个对象${finished.status === "PARTIAL" ? `，${finished.failedObjects.length} 个失败` : ""}`);
+      } else {
+        toast("error", `同步未完成（${SYNC_JOB_STATUS_TEXT[finished.status] ?? finished.status}）${finished.errorCode ? `：${finished.errorCode}` : ""}`);
+      }
+      connectors.reload(); // 刷新游标年龄与本轮统计
+    } catch (err: unknown) {
+      toast("error", err instanceof Error ? err.message : "同步触发失败");
+    } finally {
+      setSyncingId(null);
+    }
+  };
+
+  /** 打开任务详情弹窗：无本会话任务记录时提示先触发同步。 */
+  const showJobDetail = () => {
+    if (!syncJob) {
+      toast("info", "暂无同步任务记录：请先对某个连接器执行「立即同步」");
+      return;
+    }
+    setJobDetailOpen(true);
   };
 
   if (kb.loading) return <div className="card"><Loading /></div>;
@@ -203,8 +270,10 @@ export default function KbDetailPage() {
                 />
                 {c.lastErrorCode ? <p style={{ color: "var(--danger)", fontSize: 12, marginTop: 8 }}>最近错误：{c.lastErrorCode}</p> : null}
                 <Space style={{ marginTop: 12 }}>
-                  <Button size="small" icon={<ReloadOutlined />} onClick={() => toast("info", "mock：已触发一次手动同步")}>立即同步</Button>
-                  <Button size="small" onClick={() => toast("info", "mock：同步任务详情与单对象重放（契约待冻结）")}>任务详情</Button>
+                  {/* 手动触发一次增量同步（FULL 对账属调度器职责，入口暂不开放）；触发后轮询任务状态 */}
+                  <Button size="small" icon={<ReloadOutlined />} loading={syncingId === c.id} onClick={() => void syncNow(c)}>立即同步</Button>
+                  {/* 查看最近一次同步任务的执行详情（状态 / 发现数 / 失败对象） */}
+                  <Button size="small" onClick={showJobDetail}>任务详情</Button>
                 </Space>
               </Card>
             ))}
@@ -260,6 +329,37 @@ export default function KbDetailPage() {
           将归档「<strong>{data.name}</strong>」：{data.documentCount} 篇文档将不可检索与问答，{data.members.length} 名成员仅可查看。
           该操作可恢复，但传播期间按安全策略立即收紧访问。
         </div>
+      </Modal>
+
+      {/* 同步任务详情弹窗：展示本会话最近一次同步任务的执行状态与统计（GET /sync-jobs/{jobId}） */}
+      <Modal
+        title={`同步任务详情 #${syncJob?.id ?? "-"}`}
+        open={jobDetailOpen}
+        footer={null}
+        onCancel={() => setJobDetailOpen(false)}
+      >
+        {syncJob ? (
+          <Descriptions
+            size="small"
+            column={1}
+            items={[
+              // 任务状态：使用后端 sync_job 状态机的中文标签
+              { key: "status", label: "状态", children: SYNC_JOB_STATUS_TEXT[syncJob.status] ?? syncJob.status },
+              // 同步类型：手动入口固定 INCREMENTAL（增量）
+              { key: "type", label: "同步类型", children: syncJob.syncType },
+              // 本轮发现的对象总数
+              { key: "discovered", label: "发现对象", children: formatNumber(syncJob.discovered) },
+              // 失败对象清单（后端最多保留 20 条）
+              { key: "failed", label: "失败对象", children: syncJob.failedObjects.length > 0 ? syncJob.failedObjects.join("、") : "—" },
+              // 失败错误码（成功时为空）
+              { key: "errorCode", label: "错误码", children: syncJob.errorCode ?? "—" },
+              // 最近一次成功时间
+              { key: "lastSuccess", label: "最近成功", children: syncJob.lastSuccessAt ? formatDateTime(syncJob.lastSuccessAt) : "—" },
+              // 任务创建时间
+              { key: "createdAt", label: "创建时间", children: formatDateTime(syncJob.createdAt) },
+            ]}
+          />
+        ) : null}
       </Modal>
     </div>
   );

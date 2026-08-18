@@ -72,6 +72,7 @@ export default function NewKbPage() {
     setSubmitting(true);
     try {
       const values = form.getFieldsValue();
+      // 租户身份由 JWT 承载，创建请求体不携带任何租户字段（后端从会话解析归属租户）
       await api.createKb({
         name: values.name,
         description: values.description,
@@ -83,7 +84,6 @@ export default function NewKbPage() {
         modelPolicy: values.modelPolicy,
         requiresReview: values.requiresReview,
         ocrEnabled: values.ocrEnabled,
-        tenant_id: "1",
       });
       toast("success", `知识库「${values.name}」已创建`);
       router.push("/kbs");

@@ -5,6 +5,7 @@ import com.ragkb.service.modules.admin.dto.OrgDto;
 import com.ragkb.service.modules.admin.service.AdminService;
 import com.ragkb.service.modules.admin.vo.OrgVo;
 import jakarta.validation.Valid;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -21,9 +22,11 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 
+// 装配条件：组织管理依赖数据库持久化（ragkb.db.enabled=true），scaffold 模式下端点整体下线。
 @RestController
 @RequestMapping("/api/v1/orgs")
 @PreAuthorize("hasAuthority('tenant-member:manage')")
+@ConditionalOnProperty(name = "ragkb.db.enabled", havingValue = "true")
 public class OrgController {
 
     private final AdminService adminService;

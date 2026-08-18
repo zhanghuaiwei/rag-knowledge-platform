@@ -10,8 +10,13 @@ import { renderMarkdown } from "@/lib/markdown";
 
 const TEXT_EXTS = ["md", "markdown", "txt", "html"];
 
-/** 由文档详情推导受控预览正文（mock；真实实现为服务端净化的受控预览流）。 */
-function mockPreviewBody(doc: DocumentDetail): string {
+/**
+ * 受控占位正文：仅在两类场景渲染——
+ * ① 文本类文件的真实预览流读取失败（回退，不渲染不确定内容）；
+ * ② 二进制办公格式（docx/pptx/xlsx 等）：需服务端转码后才能安全渲染，
+ *    当前仅 PDF/图片/文本走真实文件流，此类格式保留占位提示。
+ */
+function placeholderBody(doc: DocumentDetail): string {
   const isText = TEXT_EXTS.includes(doc.fileExt.toLowerCase());
   const meta = [
     `**类型**：${doc.mimeType}`,
@@ -20,9 +25,9 @@ function mockPreviewBody(doc: DocumentDetail): string {
     `**敏感级**：${doc.sensitivity}`,
   ].join("  \n");
   if (isText) {
-    return `# ${doc.title}\n\n${meta}\n\n## 正文预览\n\n（mock 受控预览内容，来自《${doc.fileName}》）\n\n- 该内容经服务端净化后返回，未净化的模型/文档 HTML 不会直接渲染\n- 无 view_content 权限时不渲染原文\n- 历史版本与已撤回内容重新授权，失败给出明确原因`;
+    return `# ${doc.title}\n\n${meta}\n\n## 正文预览\n\n（预览内容暂时不可用，文件：《${doc.fileName}》）\n\n- 正文需从服务端预览流读取，读取失败时不渲染不确定内容\n- 无 VIEW_CONTENT 权限时不渲染原文\n- 历史版本与已撤回内容重新授权，失败给出明确原因`;
   }
-  return `# ${doc.title}\n\n${meta}\n\n> 《${doc.fileName}》为二进制格式，预览需服务端转码（PDF.js / mammoth / SheetJS）。当前为受控占位。`;
+  return `# ${doc.title}\n\n${meta}\n\n> 《${doc.fileName}》为二进制办公格式，需服务端转码后渲染（转码能力待接入）。当前展示占位提示。`;
 }
 
 /**
@@ -77,7 +82,7 @@ export function PreviewDialog({
           fetch(url)
             .then((resp) => resp.text())
             .then((text) => !revoked && setTextContent(text))
-            .catch(() => { /* 读取失败则回退到 mock 正文 */ });
+            .catch(() => { /* 文本流读取失败则回退到受控占位正文 */ });
         }
       })
       .catch((err: unknown) => {
@@ -122,9 +127,11 @@ export function PreviewDialog({
       ) : isText && textContent != null ? (
         <div className="markdown-body" dangerouslySetInnerHTML={{ __html: renderMarkdown(textContent) }} />
       ) : isText ? (
-        <pre style={{ whiteSpace: "pre-wrap", fontFamily: "inherit", margin: 0, color: "var(--text-2)" }}>{mockPreviewBody(doc)}</pre>
+        // 文本流读取失败：回退到受控占位正文，不渲染不确定内容
+        <pre style={{ whiteSpace: "pre-wrap", fontFamily: "inherit", margin: 0, color: "var(--text-2)" }}>{placeholderBody(doc)}</pre>
       ) : (
-        <pre style={{ whiteSpace: "pre-wrap", fontFamily: "inherit", margin: 0, color: "var(--text-2)" }}>{mockPreviewBody(doc)}</pre>
+        // 二进制办公格式（docx 等）：等待服务端转码能力，展示占位提示
+        <pre style={{ whiteSpace: "pre-wrap", fontFamily: "inherit", margin: 0, color: "var(--text-2)" }}>{placeholderBody(doc)}</pre>
       )}
     </Modal>
   );

@@ -23,7 +23,13 @@ from psycopg_pool import ConnectionPool
 
 from rag_engine.indexing.ports import SearchIndex
 from rag_engine.providers.embeddings import OpenAiCompatibleEmbedding
-from rag_engine.retrieval.models import RetrievedChunk, SearchQuery, SearchResult
+from rag_engine.retrieval.models import (
+    FulltextQuery,
+    FulltextRow,
+    RetrievedChunk,
+    SearchQuery,
+    SearchResult,
+)
 
 
 class PgVectorSearchIndex(SearchIndex):
@@ -176,6 +182,131 @@ class PgVectorSearchIndex(SearchIndex):
                     )
                 )
         return SearchResult(hits=hits, total=len(hits), policy_version=1)
+
+    # ------------------------------------------------------------------
+    # 全文搜索（2026-08-17 链路打通新增）
+    # ------------------------------------------------------------------
+
+    def fulltext_search(self, query: FulltextQuery) -> tuple[list[FulltextRow], int]:
+        """对关键词编码 query embedding → 余弦召回 → 过滤 → offset 分页。
+
+        与问答 :meth:`search` 的差异：
+        * 支持文档白名单 / 文件扩展名 / 更新时间范围过滤；
+        * 不做 ``min_score`` 阈值过滤（搜索语义是「尽量召回」，问答才需要证据阈值）；
+        * 返回 ``total``（同条件计数）供应用层计算 ``has_more``。
+        多租户红线：``tenant_id`` 恒为首个过滤条件，绝不省略。
+        """
+        # 关键词向量只编码一次，供距离排序与相似度得分两处复用。
+        query_vector = self._embedding.embed([query.keyword], model=self._embedding_model)[0]
+        # 固定字面量 WHERE 子句 + 参数绑定（值全部走 %s，无注入面）。
+        clauses = [psql.SQL("cm.tenant_id = %s")]
+        params: list[Any] = [query.tenant_id]
+        if query.kb_ids:
+            clauses.append(psql.SQL("cm.kb_id = ANY(%s)"))
+            params.append(list(query.kb_ids))
+        if query.doc_id_whitelist:
+            clauses.append(psql.SQL("cm.document_id = ANY(%s)"))
+            params.append(list(query.doc_id_whitelist))
+        if query.file_types:
+            # 文件扩展名统一小写比较（document.file_ext 存储即小写）。
+            clauses.append(psql.SQL("lower(d.file_ext) = ANY(%s)"))
+            params.append([ext.lower() for ext in query.file_types])
+        if query.date_from is not None:
+            clauses.append(psql.SQL("d.updated_at::date >= %s"))
+            params.append(query.date_from)
+        if query.date_to is not None:
+            clauses.append(psql.SQL("d.updated_at::date <= %s"))
+            params.append(query.date_to)
+        where = psql.SQL(" AND ").join(clauses)
+
+        # 行查询：按余弦距离升序（相似度降序），LIMIT/OFFSET 即 offset 分页窗口。
+        select_sql = psql.SQL(
+            """
+            SELECT cm.chunk_id, cm.document_id, cm.version_id, cm.kb_id,
+                   cm.chunk_text, cm.page_no, cm.section_path,
+                   d.file_name, d.file_ext, d.updated_at,
+                   1 - (cm.embedding <=> %s::vector) AS score
+            FROM chunk_meta cm
+            LEFT JOIN document d
+                   ON d.tenant_id = cm.tenant_id AND d.id = cm.document_id
+            WHERE {where}
+            ORDER BY cm.embedding <=> %s::vector
+            LIMIT %s OFFSET %s
+            """
+        ).format(where=where)
+        # 计数查询：与行查询同条件（不含向量参数），供 has_more 判定。
+        count_sql = psql.SQL(
+            """
+            SELECT count(*)
+            FROM chunk_meta cm
+            LEFT JOIN document d
+                   ON d.tenant_id = cm.tenant_id AND d.id = cm.document_id
+            WHERE {where}
+            """
+        ).format(where=where)
+
+        with self._pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(count_sql, params)
+            total = int(cur.fetchone()["count"])
+            # 参数顺序与 SQL 占位符一一对应：过滤参数 → 向量（score）→ 向量（排序）→ 分页。
+            cur.execute(
+                select_sql, params + [query_vector, query_vector, query.limit, query.offset]
+            )
+            rows = [
+                FulltextRow(
+                    chunk_id=row["chunk_id"],
+                    document_id=int(row["document_id"]),
+                    version_id=int(row["version_id"]),
+                    kb_id=int(row["kb_id"]),
+                    text=row["chunk_text"],
+                    file_name=row["file_name"] or "",
+                    file_ext=row["file_ext"],
+                    page_no=row["page_no"],
+                    section_path=list(row["section_path"] or []),
+                    # datetime 统一转 ISO 字符串（DTO 解耦，前端直接展示）。
+                    updated_at=row["updated_at"].isoformat() if row["updated_at"] else None,
+                    score=round(float(row["score"]), 6),
+                )
+                for row in cur.fetchall()
+            ]
+        return rows, total
+
+    def get_chunk(self, chunk_id: str, *, tenant_id: int) -> FulltextRow | None:
+        """按 chunk_id + tenant_id 直查单条分块（搜索摘录回查）。
+
+        tenant_id 与 chunk_id 联合过滤：跨租户拿到的 chunk_id 一律视为不存在，
+        不泄露其他租户是否存在该分块（deny-by-default）。
+        """
+        with self._pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(
+                """
+                SELECT cm.chunk_id, cm.document_id, cm.version_id, cm.kb_id,
+                       cm.chunk_text, cm.page_no, cm.section_path,
+                       d.file_name, d.file_ext, d.updated_at
+                FROM chunk_meta cm
+                LEFT JOIN document d
+                       ON d.tenant_id = cm.tenant_id AND d.id = cm.document_id
+                WHERE cm.chunk_id = %s AND cm.tenant_id = %s
+                """,
+                (chunk_id, tenant_id),
+            )
+            row = cur.fetchone()
+        if row is None:
+            return None
+        return FulltextRow(
+            chunk_id=row["chunk_id"],
+            document_id=int(row["document_id"]),
+            version_id=int(row["version_id"]),
+            kb_id=int(row["kb_id"]),
+            text=row["chunk_text"],
+            file_name=row["file_name"] or "",
+            file_ext=row["file_ext"],
+            page_no=row["page_no"],
+            section_path=list(row["section_path"] or []),
+            updated_at=row["updated_at"].isoformat() if row["updated_at"] else None,
+            # 直查场景无相关性得分，固定 0（摘录展示不依赖分数）。
+            score=0.0,
+        )
 
     # ------------------------------------------------------------------
     # 内部工具

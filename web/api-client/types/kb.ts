@@ -35,7 +35,7 @@ export interface UpdateKbInput {
   requiresReview?: boolean;
 }
 
-/** 创建知识库入参（对齐新建向导字段）。 */
+/** 创建知识库入参（对齐新建向导字段；租户身份由 JWT 承载，不含租户字段）。 */
 export interface CreateKbInput {
   name: string;
   description?: string;
@@ -47,7 +47,6 @@ export interface CreateKbInput {
   modelPolicy?: string;
   requiresReview?: boolean;
   ocrEnabled?: boolean;
-  tenant_id?: string;
 }
 
 export interface AddKbMemberInput {

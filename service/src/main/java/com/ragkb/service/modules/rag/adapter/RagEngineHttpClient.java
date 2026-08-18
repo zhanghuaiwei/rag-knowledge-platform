@@ -7,7 +7,6 @@ import com.ragkb.service.common.exception.ErrorCode;
 import com.ragkb.service.common.model.TenantId;
 import com.ragkb.service.modules.rag.port.ChatStreamEvent;
 import com.ragkb.service.modules.rag.port.RagEnginePort;
-import com.ragkb.service.util.TodoSupport;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -20,13 +19,15 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.function.Consumer;
 
 /**
- * rag-engine（Python）HTTP 适配器——最小问答闭环的真实对接。
+ * rag-engine（Python）HTTP 适配器——问答与全文搜索闭环的真实对接。
  *
  * <p>简单 JSON 调用用 {@link RestClient}；SSE 问答用 JDK {@link HttpClient}
  * 逐行解析 {@code event:/data:}（Python 侧按单行 JSON 编码，避免换行破坏边界）。
@@ -34,7 +35,8 @@ import java.util.function.Consumer;
  * <p>超时：普通调用默认 {@code rag-engine.timeout-ms}（10s）；chat 流默认
  * {@code rag-engine.chat-timeout-ms}（120s，LLM 流式首个事件等待上限，正文可长）。
  *
- * <p>⚠️ 仍未实现（非最小闭环所需）：{@link #search} / {@link #rerank} 保持桩。
+ * <p>2026-08-17 全文搜索链路打通：{@link #search} / {@link #rerank} /
+ * {@link #getChunk} 从桩替换为真实调用（search 走 page 分页由调用方换算 cursor）。
  */
 @Component
 public class RagEngineHttpClient implements RagEnginePort {
@@ -163,12 +165,53 @@ public class RagEngineHttpClient implements RagEnginePort {
 
     @Override
     public Map<String, Object> search(TenantId tenantId, Map<String, Object> query) {
-        return TodoSupport.notImplemented("RagEngineHttpClient#search");
+        // 租户上下文统一在此注入（与 chatStream 同一约定），调用方只组装业务参数。
+        query.put("tenantId", tenantId.value());
+        String json = restClient.post()
+                .uri("/api/query/search")
+                .body(query)
+                .retrieve()
+                .body(String.class);
+        return parseJsonObject(json);
     }
 
     @Override
     public List<String> rerank(TenantId tenantId, String query, List<Map<String, String>> candidates, int topN) {
-        return TodoSupport.notImplemented("RagEngineHttpClient#rerank");
+        // Python 侧为确定性词项覆盖精排：query + candidates(chunkId/text) → topN。
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("requestId", UUID.randomUUID().toString());
+        body.put("query", query);
+        body.put("topN", topN);
+        body.put("candidates", candidates);
+        String json = restClient.post()
+                .uri("/api/query/rerank")
+                .body(body)
+                .retrieve()
+                .body(String.class);
+        // 解析信封 items[].chunkId → 按分数降序的 chunkId 列表。
+        Object items = parseJsonObject(json).get("items");
+        if (!(items instanceof List<?> list)) {
+            return List.of();
+        }
+        List<String> chunkIds = new ArrayList<>();
+        for (Object item : list) {
+            if (item instanceof Map<?, ?> map && map.get("chunkId") instanceof String chunkId) {
+                chunkIds.add(chunkId);
+            }
+        }
+        return chunkIds;
+    }
+
+    @Override
+    public Map<String, Object> getChunk(TenantId tenantId, String chunkId) {
+        // GET 无请求体，租户经 query 参数透传（内网信任域，与 search 同级）。
+        String json = restClient.get()
+                .uri(uriBuilder -> uriBuilder.path("/api/query/hits/{chunkId}")
+                        .queryParam("tenantId", tenantId.value())
+                        .build(chunkId))
+                .retrieve()
+                .body(String.class);
+        return parseJsonObject(json);
     }
 
     @Override

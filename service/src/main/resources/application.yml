@@ -119,3 +119,15 @@ ragkb:
   # refresh cookie 是否加 Secure：生产 https 置 RAGKB_COOKIE_SECURE=true
   cookie:
     secure: ${RAGKB_COOKIE_SECURE:false}
+  # Webhook 投递引擎（integration 模块 WebhookDeliveryServiceImpl）：
+  #   * dispatch-interval-ms：outbox 轮询周期（fan-out + 到期投递执行）；
+  #   * max-attempts：单条投递最大尝试次数（含首次，超限置 DEAD 死信，仅人工重放）；
+  #   * timeout-ms：单次 HTTP POST 的连接与读取超时（回调方慢响应不得拖垮投递线程）。
+  webhook:
+    dispatch-interval-ms: ${RAGKB_WEBHOOK_DISPATCH_INTERVAL_MS:5000}
+    max-attempts: ${RAGKB_WEBHOOK_MAX_ATTEMPTS:3}
+    timeout-ms: ${RAGKB_WEBHOOK_TIMEOUT_MS:10000}
+  # 内容源连接器同步引擎（connector 模块 SyncJobDispatchScheduler）：
+  #   * sync-interval-ms：sync_job 队列轮询周期（QUEUED 认领 → 适配器发现 → 逐对象 upsert）。
+  connector:
+    sync-interval-ms: ${RAGKB_CONNECTOR_SYNC_INTERVAL_MS:5000}

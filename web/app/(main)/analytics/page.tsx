@@ -15,8 +15,11 @@ import { downloadCsv } from "@/lib/csv";
 import { formatCost, formatNumber, formatPercent } from "@/lib/format";
 import { useAsync } from "@/lib/use-async";
 
-/** mock 配额：真实实现来自租户配额接口（GKB-08，契约待冻结）。 */
-const QUOTAS = [
+/**
+ * 租户配额占位数据（暂未接入）：后端暂无租户配额查询接口，
+ * 等待 GKB-08 配额契约冻结后替换为真实接口数据源；下方数值仅为布局占位演示。
+ */
+const QUOTA_PLACEHOLDERS = [
   { label: "存储", used: 186, total: 500, unit: "GB" },
   { label: "文档数", used: 4213, total: 20000, unit: "篇" },
   { label: "本月 Token", used: 3_420_000, total: 10_000_000, unit: "" },
@@ -150,8 +153,9 @@ export default function AnalyticsPage() {
           />
         </Card>
 
-        <Card title="租户配额">
-          {QUOTAS.map((q) => {
+        {/* 配额卡片暂未接入真实数据源：标题标注占位状态，等待租户配额接口（GKB-08） */}
+        <Card title={<span>租户配额 <Tag color="default" style={{ marginLeft: 8 }}>暂未接入</Tag></span>}>
+          {QUOTA_PLACEHOLDERS.map((q) => {
             const ratio = q.used / q.total;
             return (
               <div key={q.label} style={{ marginBottom: 16 }}>
@@ -169,7 +173,10 @@ export default function AnalyticsPage() {
               </div>
             );
           })}
-          <p style={{ fontSize: 12, color: "var(--text-3)" }}>容量超限行为可预测：接近上限时通知所有者与管理员（GKB-08）。</p>
+          {/* 占位说明：数值非真实配额，接口就绪后由 GKB-08 契约替换 */}
+          <p style={{ fontSize: 12, color: "var(--text-3)" }}>
+            暂未接入租户配额接口：以上数值仅为占位演示。容量超限行为可预测，接近上限时通知所有者与管理员（GKB-08）。
+          </p>
         </Card>
       </div>
 

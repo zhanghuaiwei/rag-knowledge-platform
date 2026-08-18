@@ -3,6 +3,7 @@ package com.ragkb.service.modules.admin.controller;
 import com.ragkb.service.common.api.ApiResponse;
 import com.ragkb.service.modules.admin.vo.NotificationItemVo;
 import com.ragkb.service.modules.admin.service.AdminService;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -15,8 +16,10 @@ import java.util.List;
 /**
  * 用户通知接口入口。
  */
+// 装配条件：通知依赖数据库持久化（ragkb.db.enabled=true），scaffold 模式下端点整体下线。
 @RestController
 @RequestMapping("/api/v1/notifications")
+@ConditionalOnProperty(name = "ragkb.db.enabled", havingValue = "true")
 public class NotificationController {
 
     private final AdminService adminService;
