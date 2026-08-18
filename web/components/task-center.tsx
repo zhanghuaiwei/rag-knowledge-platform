@@ -48,7 +48,7 @@ const TYPE_COLOR: Record<TaskType, string> = {
 
 /**
  * 任务中心抽屉:展示当前用户的异步任务(上传/摄取/索引重建/同步/删除/导出)。
- * 运行中任务轮询刷新,可取消(mock 提示)。
+ * 运行中任务每 3 秒轮询刷新;取消经 POST /tasks/{id} 真实生效。
  */
 export function TaskCenter() {
   const router = useRouter();

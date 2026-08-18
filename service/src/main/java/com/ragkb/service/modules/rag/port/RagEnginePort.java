@@ -62,6 +62,13 @@ public interface RagEnginePort {
     /** POST /api/query/rerank：精排 Reranker，返回按分数降序的 chunkId 列表。 */
     List<String> rerank(TenantId tenantId, String query, List<Map<String, String>> candidates, int topN);
 
+    /**
+     * GET /api/query/hits/{chunkId}：按命中 id 回查分块正文（搜索摘录）。
+     * 2026-08-17 新增：全文搜索摘录端点需要按 hitId 直查片段，避免「重新检索定位」
+     * 在深翻页/关键词变化时找不到目标命中；跨租户按不存在处理（404 语义）。
+     */
+    Map<String, Object> getChunk(TenantId tenantId, String chunkId);
+
     /** GET /api/engine/health：引擎健康探针。 */
     Map<String, Object> health();
 

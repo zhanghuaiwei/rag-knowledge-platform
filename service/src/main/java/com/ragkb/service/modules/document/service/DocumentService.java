@@ -107,4 +107,49 @@ public interface DocumentService {
     /** 全文搜索（cursor 游标分页）。 */
     CursorPageData<?> search(String keyword, List<Long> kbIds, String dateFrom, String dateTo,
                              String fileExt, String sort, String cursor, int size);
+
+    // =====================================================================
+    // 治理中心协作（governance 模块经本 Service 触达 document 领域的审核与删除状态，
+    // 避免跨模块直接依赖 document 持久化层 —— PackageStructureTest 红线）
+    // =====================================================================
+
+    /**
+     * 审核队列条目快照：待审文档 + 最近一次送审留痕（governance 组装队列视图的原始数据）。
+     *
+     * @param reviewId     最近一次 SUBMIT 留痕的 document_review.id（无留痕的历史数据为 0）
+     * @param commentCount 该文档累计审核意见条数（document_review.comment 非空行数）
+     */
+    record ReviewQueueItem(long reviewId, long documentId, long kbId, String title, String sensitivity,
+                           Long submitterId, java.time.Instant submittedAt, long commentCount) {
+    }
+
+    /** 分页列出待审核文档（review_status=PENDING_REVIEW，tenant 过滤 + del_flag=0）。 */
+    PageData<ReviewQueueItem> listPendingReviews(int page, int size);
+
+    /** 审核通过：review_status→PUBLISHED 并追加 APPROVE 留痕；非待审状态抛 CONFLICT。 */
+    void approveDocumentReview(long documentId, String comment);
+
+    /** 审核驳回：review_status→REJECTED 并追加 REJECT 留痕；意见为空抛 BAD_REQUEST。 */
+    void rejectDocumentReview(long documentId, String comment);
+
+    /** 撤回送审：review_status→WITHDRAWN 并追加 WITHDRAW 留痕；非待审状态抛 CONFLICT。 */
+    void withdrawDocumentFromReview(long documentId);
+
+    /**
+     * 文档治理快照（删除审批展示与留档用）：仅未软删文档可读，
+     * 不存在或跨租户按 NOT_FOUND 拒绝（deny-by-default）。
+     */
+    record DocumentGovernanceBrief(long documentId, long kbId, long tenantId, String title,
+                                   String fileName, String sensitivity, String lifecycleStatus,
+                                   String reviewStatus, Long currentVersionId, Long policyVersion) {
+    }
+
+    /** 读取文档治理快照（deleteKb 级联与治理删除审批共用的文档侧只读视图）。 */
+    DocumentGovernanceBrief documentGovernanceBrief(long documentId);
+
+    /**
+     * 按 id 批量软删文档（治理删除审批的执行步骤）：lifecycle=DELETING + del_flag=1，
+     * 返回实际软删成功的文档 id（已删/不存在/跨租户的 id 被跳过）。
+     */
+    List<Long> softDeleteDocumentsByIds(long tenantId, List<Long> documentIds);
 }

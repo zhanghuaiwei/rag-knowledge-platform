@@ -74,7 +74,11 @@ def build_container(
             parser=registry.parser,
             search_index=registry.search_index,
         ),
-        retrieval=RetrievalService(search_index=registry.search_index),
+        retrieval=RetrievalService(
+            search_index=registry.search_index,
+            # 全文搜索融合精排复用本地词项覆盖 RerankService（不可用时自动退化为纯向量序）。
+            reranker=rerank if rerank.available else None,
+        ),
         rerank=rerank,
         generation=GenerationService(
             search_index=registry.search_index,

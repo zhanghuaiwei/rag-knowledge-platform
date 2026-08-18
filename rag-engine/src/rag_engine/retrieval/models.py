@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -60,3 +61,38 @@ class SearchPageSnapshot:
     page: int
     size: int
     has_more: bool
+
+
+class FulltextQuery(BaseModel):
+    """全文搜索索引查询（2026-08-17 全文搜索链路打通新增）。
+
+    与问答用 :class:`SearchQuery` 的差异：支持文档白名单 / 文件类型 /
+    时间范围过滤与 offset 分页；检索目标从「问答证据」变为「命中列表」。
+    """
+
+    keyword: str = Field(min_length=1)
+    tenant_id: int = Field(gt=0)
+    kb_ids: list[int] = Field(default_factory=list)
+    doc_id_whitelist: list[int] = Field(default_factory=list)
+    file_types: list[str] = Field(default_factory=list)
+    date_from: date | None = None
+    date_to: date | None = None
+    # 召回窗口大小（应用层可放大后再做融合重排与切片）。
+    limit: int = Field(default=20, ge=1, le=300)
+    offset: int = Field(default=0, ge=0)
+
+
+class FulltextRow(BaseModel):
+    """索引层返回的单条全文搜索原始行（应用层再生成 snippet 高亮）。"""
+
+    chunk_id: str
+    document_id: int
+    version_id: int
+    kb_id: int
+    text: str
+    file_name: str = ""
+    file_ext: str | None = None
+    page_no: int | None = None
+    section_path: list[str] = Field(default_factory=list)
+    updated_at: str | None = None
+    score: float = Field(ge=0)

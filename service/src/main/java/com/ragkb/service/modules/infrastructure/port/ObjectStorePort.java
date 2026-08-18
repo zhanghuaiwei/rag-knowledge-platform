@@ -1,4 +1,4 @@
-package com.ragkb.service.modules.infrastructure.objectstore.port;
+package com.ragkb.service.modules.infrastructure.port;
 
 import com.ragkb.service.common.model.TenantId;
 
@@ -12,7 +12,8 @@ import java.util.Optional;
  *
  * 迁移说明：本接口原位于 {@code com.ragkb.service.common.storage}（基础设施适配器不得留在
  * common 的模块化红线），已整体迁至 infrastructure 模块——接口在本包（port/），实现在同模块
- * {@code adapter/}（LocalObjectStore / MinioObjectStore），common/storage 旧位置已删除。
+ * {@code adapter/}（LocalObjectStore / MinioObjectStore）。目录为 PackageStructureTest
+ * 约定的 modules/&lt;feature&gt;/&lt;layer&gt; 两级结构。
  */
 public interface ObjectStorePort {
 

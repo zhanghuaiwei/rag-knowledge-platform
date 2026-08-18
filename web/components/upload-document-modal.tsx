@@ -20,8 +20,9 @@ interface UploadFormValues {
 }
 
 /**
- * 文档上传弹窗（mock 演示）：真实实现为分片上传 + 安全扫描队列（GKB-03），
- * 当前经 api.uploadDocument 进入 mock 列表，摄取状态从 PARSING 开始。
+ * 文档上传弹窗：经 api.uploadDocument 走真实分片上传
+ * （/upload/init → 逐分片 PUT → complete 轮询任务终态），
+ * 完成后文档进入安全扫描与解析队列（GKB-03），摄取状态从 PARSING 开始。
  */
 export function UploadDocumentModal({
   open,
@@ -78,7 +79,7 @@ export function UploadDocumentModal({
         fileName: file.name,
         fileSize: file.size,
         sensitivity: values.sensitivity,
-        file, // 真实分片上传需文件字节；mock 传输层忽略该字段
+        file, // 文件字节：http 传输层按服务端返回的 partSize 切片直传
       });
       toast("success", `「${doc.title}」已上传，进入解析队列`);
       onUploaded(doc);

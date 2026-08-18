@@ -41,10 +41,11 @@ import com.ragkb.service.modules.document.vo.UploadInitResponseVo;
 import com.ragkb.service.modules.ingestion.service.IngestionUseCase;
 import com.ragkb.service.modules.identity.service.TokenService;
 import com.ragkb.service.modules.access.service.AccessPolicyUseCase;
-import com.ragkb.service.modules.infrastructure.objectstore.port.ObjectStorePort;
+import com.ragkb.service.modules.infrastructure.port.ObjectStorePort;
 import com.ragkb.service.modules.knowledge.service.KbService;
 import com.ragkb.service.modules.task.service.TaskService;
-import com.ragkb.service.util.TodoSupport;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -56,6 +57,7 @@ import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.HashMap;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -81,7 +83,7 @@ import java.util.stream.Collectors;
  *                                  事务写 document/document_version/parse_task/outbox →
  *                                  返回 SUCCEEDED 任务（resourceId=documentId 供前端回读）
  * </pre>
- * 原始字节只进对象存储（本地开发为 {@link com.ragkb.service.modules.infrastructure.objectstore.adapter.LocalObjectStore}），
+ * 原始字节只进对象存储（本地开发为 {@link com.ragkb.service.modules.infrastructure.adapter.LocalObjectStore}），
  * 数据库只存 {@code object_key + content_sha256}（不可逆摘要，DDL 注释边界）。
  *
  * <p>⚠️ 说明：
@@ -507,6 +509,162 @@ public class DocumentServiceImpl implements DocumentService {
     }
 
     // =====================================================================
+    // 治理中心协作（governance 模块经 DocumentService 触达审核/删除状态）
+    // =====================================================================
+
+    @Override
+    public PageData<ReviewQueueItem> listPendingReviews(int page, int size) {
+        Long tenantId = currentTenantIdOrNull();
+        // 待审队列 = review_status=PENDING_REVIEW 的未删文档（@TableLogic 自动过滤 del_flag=1）。
+        IPage<Document> documentPage = documentMapper.selectPage(new Page<>(page, size),
+                new LambdaQueryWrapper<Document>()
+                        .eq(tenantId != null, Document::getTenantId, tenantId)
+                        .eq(Document::getReviewStatus, "PENDING_REVIEW")
+                        .orderByDesc(Document::getUpdateTime));
+        List<Document> documents = documentPage.getRecords();
+        if (documents.isEmpty()) {
+            return PageData.empty(page, size);
+        }
+        List<Long> documentIds = documents.stream().map(Document::getId).toList();
+        // 一次拉取本批文档的全部审核留痕（管理页 size<=20，行数可控），
+        // 内存组装「最近一次送审」与「累计意见数」，避免逐文档 N+1 查询。
+        List<DocumentReview> history = documentReviewMapper.selectList(
+                new LambdaQueryWrapper<DocumentReview>()
+                        .in(DocumentReview::getDocumentId, documentIds)
+                        .orderByDesc(DocumentReview::getId));
+        Map<Long, DocumentReview> latestSubmitByDoc = new HashMap<>();
+        Map<Long, Long> commentCountByDoc = new HashMap<>();
+        for (DocumentReview review : history) {
+            if ("SUBMIT".equals(review.getAction())) {
+                // 结果已按 id 倒序，putIfAbsent 保留的首条即最新送审。
+                latestSubmitByDoc.putIfAbsent(review.getDocumentId(), review);
+            }
+            if (StringUtils.hasText(review.getComment())) {
+                // 意见数 = comment 非空的留痕行数（SUBMIT 行通常无意见，不计入）。
+                commentCountByDoc.merge(review.getDocumentId(), 1L, Long::sum);
+            }
+        }
+        List<ReviewQueueItem> items = documents.stream().map(document -> {
+            // 无送审留痕的历史数据：降级用文档审计字段（提交人取送审动作发生者，退而取建档人）。
+            DocumentReview submit = latestSubmitByDoc.get(document.getId());
+            return new ReviewQueueItem(
+                    submit != null ? submit.getId() : 0L,
+                    document.getId(),
+                    document.getKbId(),
+                    document.getTitle(),
+                    document.getSensitivity(),
+                    submit != null ? submit.getActorUserId() : document.getCreateBy(),
+                    submit != null ? submit.getCreateTime() : document.getCreateTime(),
+                    commentCountByDoc.getOrDefault(document.getId(), 0L));
+        }).toList();
+        return PageData.of(items, documentPage.getTotal(), page, size);
+    }
+
+    @Override
+    @Transactional
+    public void approveDocumentReview(long documentId, String comment) {
+        // 审核状态机守卫：仅待审核文档可被通过（重复审批/已发布直接拒绝）。
+        Document document = requireDocument(documentId);
+        if (!"PENDING_REVIEW".equals(document.getReviewStatus())) {
+            throw new ApiException(ErrorCode.CONFLICT, "文档不在待审核状态，无法通过");
+        }
+        // 通过即发布：review_status→PUBLISHED（进入在线索引的传播由检索链路按状态过滤）。
+        document.setReviewStatus("PUBLISHED");
+        documentMapper.updateById(document);
+        // 追加 APPROVE 留痕（document_review 为追加写证据表，只插入不更新）。
+        appendReviewHistory(document, "APPROVE", comment);
+    }
+
+    @Override
+    @Transactional
+    public void rejectDocumentReview(long documentId, String comment) {
+        // 驳回必须给出理由（与前端「驳回必须填写审核意见」一致），供作者修改后重新提交。
+        if (!StringUtils.hasText(comment)) {
+            throw new ApiException(ErrorCode.BAD_REQUEST, "驳回必须填写审核意见");
+        }
+        Document document = requireDocument(documentId);
+        if (!"PENDING_REVIEW".equals(document.getReviewStatus())) {
+            throw new ApiException(ErrorCode.CONFLICT, "文档不在待审核状态，无法驳回");
+        }
+        document.setReviewStatus("REJECTED");
+        documentMapper.updateById(document);
+        // 追加 REJECT 留痕（携带驳回意见，作为作者修改的依据）。
+        appendReviewHistory(document, "REJECT", comment);
+    }
+
+    @Override
+    @Transactional
+    public void withdrawDocumentFromReview(long documentId) {
+        Document document = requireDocument(documentId);
+        if (!"PENDING_REVIEW".equals(document.getReviewStatus())) {
+            // 仅待审核文档可撤回（已发布/已驳回的走重新送审链路）。
+            throw new ApiException(ErrorCode.CONFLICT, "仅待审核状态的文档可以撤回");
+        }
+        document.setReviewStatus("WITHDRAWN");
+        documentMapper.updateById(document);
+        // 追加 WITHDRAW 留痕（提交人主动撤回，审核队列即刻移除）。
+        appendReviewHistory(document, "WITHDRAW", null);
+    }
+
+    @Override
+    public DocumentGovernanceBrief documentGovernanceBrief(long documentId) {
+        // 复用 requireDocument 的存在性 + 租户归属校验（deny-by-default）；
+        // 软删后的文档按不存在处理 —— 治理侧快照在软删前已留档于 deletion_task.preview_json。
+        Document document = requireDocument(documentId);
+        return new DocumentGovernanceBrief(
+                document.getId(),
+                document.getKbId(),
+                // 历史数据 tenant_id 为 0/null（未归属租户）时兜底默认租户 1（与 kbBrief 修复约定一致）。
+                document.getTenantId() == null || document.getTenantId() <= 0
+                        ? DEFAULT_TENANT_ID : document.getTenantId(),
+                document.getTitle(),
+                document.getFileName(),
+                document.getSensitivity(),
+                document.getLifecycleStatus(),
+                document.getReviewStatus(),
+                document.getCurrentVersionId(),
+                document.getPolicyVersion());
+    }
+
+    @Override
+    @Transactional
+    public List<Long> softDeleteDocumentsByIds(long tenantId, List<Long> documentIds) {
+        if (documentIds == null || documentIds.isEmpty()) {
+            return List.of();
+        }
+        // 先圈定租户内未删文档（@TableLogic 过滤 del_flag=1，天然跳过已删/不存在/跨租户 id）。
+        List<Document> documents = documentMapper.selectList(new LambdaQueryWrapper<Document>()
+                .eq(Document::getTenantId, tenantId)
+                .in(Document::getId, documentIds)
+                .select(Document::getId));
+        if (documents.isEmpty()) {
+            return List.of();
+        }
+        // 批量软删：lifecycle=DELETING + del_flag=1 两列一致（ck_document_del_flag 要求；
+        // del_flag 为 @TableLogic 字段、实体更新不落 SET，故用 wrapper setSql 显式置 1）。
+        documentMapper.update(null, new LambdaUpdateWrapper<Document>()
+                .eq(Document::getTenantId, tenantId)
+                .in(Document::getId, documents.stream().map(Document::getId).toList())
+                .set(Document::getLifecycleStatus, LIFECYCLE_DELETING)
+                .setSql("del_flag = 1"));
+        // 返回实际软删的文档 id（对象存储原文与向量的物理清理由调用方异步执行）。
+        return documents.stream().map(Document::getId).toList();
+    }
+
+    /** 追加审核留痕（document_review 追加写证据表，DDL REVOKE UPDATE/DELETE 保持不可变）。 */
+    private void appendReviewHistory(Document document, String action, String comment) {
+        DocumentReview review = new DocumentReview();
+        review.setTenantId(document.getTenantId());
+        review.setDocumentId(document.getId());
+        review.setVersionId(document.getCurrentVersionId());
+        review.setAction(action);
+        review.setActorUserId(SecurityUtils.currentUserId());
+        review.setComment(comment);
+        review.setPolicyVersion(document.getPolicyVersion());
+        documentReviewMapper.insert(review);
+    }
+
+    // =====================================================================
     // 摄取状态（供摄取调度器经 DocumentService 跨模块协作，避免直接依赖 document 持久化层）
     // =====================================================================
 
@@ -722,19 +880,38 @@ public class DocumentServiceImpl implements DocumentService {
     }
 
     // =====================================================================
-    // 检索（依赖 rag-engine / 索引，暂为桩）
+    // 检索（统一委托 conversation 模块的同一搜索链路，避免双实现漂移）
     // =====================================================================
+
+    /** 搜索会话服务（懒获取：SearchChatServiceImpl 构造期已注入 DocumentService，直接注入会成环）。 */
+    @Autowired
+    private ObjectProvider<com.ragkb.service.modules.conversation.service.SearchChatService> searchChatServiceProvider;
 
     @Override
     public Object getSearchExcerpt(String hitId) {
-        return TodoSupport.notImplemented("DocumentService#getSearchExcerpt");
+        // 历史遗留的重复声明：全文搜索唯一入口在 SearchController → SearchChatService，
+        // 此处委托同一链路保持契约不破坏（FileExt 单数包装为列表透传）。
+        return requireSearchChatService().getSearchExcerpt(hitId);
     }
 
     @Override
     public com.ragkb.service.common.api.CursorPageData<?> search(String keyword, List<Long> kbIds, String dateFrom,
                                                                  String dateTo, String fileExt, String sort,
                                                                  String cursor, int size) {
-        return TodoSupport.notImplemented("DocumentService#search");
+        // 委托同一搜索链路；本接口签名的 fileExt 为单值、无 fileExts 列表语义，
+        // 包装为单元素列表；sort 当前由 Python 侧融合排序承担（本参数未消费）。
+        return requireSearchChatService().search(keyword, kbIds,
+                fileExt == null || fileExt.isBlank() ? List.of() : List.of(fileExt),
+                dateFrom, dateTo, cursor, size);
+    }
+
+    /** 取搜索会话服务；同一 db.enabled 开关下必有实现 bean，缺失说明装配异常（快速失败）。 */
+    private com.ragkb.service.modules.conversation.service.SearchChatService requireSearchChatService() {
+        com.ragkb.service.modules.conversation.service.SearchChatService service = searchChatServiceProvider.getIfAvailable();
+        if (service == null) {
+            throw new ApiException(ErrorCode.INTERNAL_ERROR, "搜索服务未装配");
+        }
+        return service;
     }
 
     // =====================================================================

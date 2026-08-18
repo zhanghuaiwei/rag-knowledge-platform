@@ -3,9 +3,35 @@
 <mapper namespace="com.ragkb.service.modules.admin.persistence.mapper.SysOrgMapper">
 
     <!--
-        sys_org 表自定义查询骨架。
-        单表 CRUD 由 BaseMapper 提供，无需在此声明；
-        JOIN / 聚合等自定义 SQL（resultMap + select 等）由业务实现时在此编写。
+        sys_org 表自定义 SQL：成员数聚合 / 物理删除 / 子树路径重写。
+        手写 SQL 显式带 tenant_id + del_flag = 0（@TableLogic 只作用于 BaseMapper 生成 CRUD，不作用于手写 XML）。
     -->
+
+    <!-- 按组织聚合成员数：JOIN 限定租户并过滤已删成员关系，COUNT 结果经驼峰映射到 OrgMemberCountRow。 -->
+    <select id="selectMemberCounts" resultType="com.ragkb.service.modules.admin.persistence.query.OrgMemberCountRow">
+        SELECT uo.org_id AS orgId,
+               COUNT(*)  AS memberCount
+        FROM sys_user_org uo
+        WHERE uo.tenant_id = #{tenantId}
+          AND uo.del_flag = 0
+        GROUP BY uo.org_id
+    </select>
+
+    <!-- 物理删除组织（唯一键 uq_sys_org_sibling_name 不含 del_flag，软删会占住同级名称；删除守卫由服务层前置）。 -->
+    <delete id="hardDeleteById">
+        DELETE FROM sys_org
+        WHERE tenant_id = #{tenantId}
+          AND id = #{orgId}
+    </delete>
+
+    <!-- 子树物化路径前缀重写：LIKE oldPrefix || '%' 命中含自身的整棵子树，substring 拼新前缀保持后代相对结构。 -->
+    <update id="replaceSubtreePath">
+        UPDATE sys_org
+        SET path = #{newPrefix} || substring(path FROM length(#{oldPrefix}) + 1),
+            update_time = now()
+        WHERE tenant_id = #{tenantId}
+          AND path LIKE #{oldPrefix} || '%'
+          AND del_flag = 0
+    </update>
 
 </mapper>

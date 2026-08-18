@@ -18,7 +18,7 @@ interface InviteForm {
   role: KbMemberRole;
 }
 
-/** 知识库成员管理：邀请 / 移除 / 角色变更（OWNER 权限），写操作落地 mock 库。 */
+/** 知识库成员管理：邀请 / 移除 / 角色变更（OWNER 权限），写操作经 /kbs/{id}/members 真实落库。 */
 export function MemberManager({ kbId, isOwner }: { kbId: number; isOwner: boolean }) {
   const toast = useToast();
   const [form] = Form.useForm<InviteForm>();

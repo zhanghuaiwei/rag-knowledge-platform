@@ -93,7 +93,14 @@ export default function AuditPage() {
               { value: "FAILED", label: "失败" },
             ]}
           />
-          <Button icon={<DownloadOutlined />} onClick={() => toast("info", "mock：审计导出需权限校验与脱敏（契约待冻结）")}>
+          {/* 审计导出按钮：后端 /analytics/export 白名单（usage/costs/top-documents/dau）暂无 audit 类别，
+              审计导出需权限校验与脱敏契约冻结后才可接通，点击给出明确缺口提示而非模拟下载 */}
+          <Button
+            icon={<DownloadOutlined />}
+            onClick={() =>
+              toast("info", "审计导出暂未接通：需权限校验与脱敏契约冻结；后端现有 /analytics/export 仅支持 usage/costs/top-documents/dau")
+            }
+          >
             导出
           </Button>
         </div>

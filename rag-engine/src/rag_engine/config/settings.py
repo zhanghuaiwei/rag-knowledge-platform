@@ -241,7 +241,7 @@ class Settings(BaseSettings):
         return RerankerProviderType.RERANKER_PROVIDER_TYPE
 
     @model_validator(mode="after")
-    def _apply_provider_presets_and_fallbacks(self) -> "Settings":
+    def _apply_provider_presets_and_fallbacks(self) -> Settings:
         """按 provider_type 预设注入 base_url/model/dimension；保证向后兼容。
 
         覆盖规则（以 LLM 为例，Embedding 同理）：
@@ -273,7 +273,10 @@ class Settings(BaseSettings):
         emb_preset = _EMBEDDING_PRESETS[self.embedding_provider_type]
         if not self.embedding_base_url:
             self.embedding_base_url = str(emb_preset["base_url"])
-        if not self.embedding_model and self.embedding_provider_type != EmbeddingProviderType.OPENAI_COMPATIBLE:
+        if (
+            not self.embedding_model
+            and self.embedding_provider_type != EmbeddingProviderType.OPENAI_COMPATIBLE
+        ):
             self.embedding_model = str(emb_preset["model"])
         if self.embedding_dimension == 0:
             self.embedding_dimension = int(emb_preset["dimension"])
@@ -313,8 +316,12 @@ class Settings(BaseSettings):
             ),
             "reranker": self.reranker_provider_type.value,
             "safety": self.safety_provider_type.value,
-            "object_store": "minio" if (self.minio_access_key and self.minio_secret_key) else "disabled",
-            "search_index": "pgvector" if (self.pgvector_enabled and self.database_url) else "disabled",
+            "object_store": (
+                "minio" if (self.minio_access_key and self.minio_secret_key) else "disabled"
+            ),
+            "search_index": (
+                "pgvector" if (self.pgvector_enabled and self.database_url) else "disabled"
+            ),
         }
 
     @staticmethod

@@ -2,7 +2,13 @@
 
 from typing import Protocol
 
-from rag_engine.retrieval.models import RetrievedChunk, SearchQuery, SearchResult
+from rag_engine.retrieval.models import (
+    FulltextQuery,
+    FulltextRow,
+    RetrievedChunk,
+    SearchQuery,
+    SearchResult,
+)
 
 
 class EmbeddingProvider(Protocol):
@@ -22,6 +28,14 @@ class SearchIndex(Protocol):
 
     def search(self, query: SearchQuery) -> SearchResult:
         """执行带授权过滤条件的检索。"""
+        ...
+
+    def fulltext_search(self, query: FulltextQuery) -> tuple[list[FulltextRow], int]:
+        """执行全文搜索（向量召回 + 过滤 + offset 分页），返回行列表与命中总数。"""
+        ...
+
+    def get_chunk(self, chunk_id: str, *, tenant_id: int) -> FulltextRow | None:
+        """按 chunk_id + tenant_id 直查单条分块（摘录回查）；不存在返回 None。"""
         ...
 
     def upsert_chunks(self, chunks: list[RetrievedChunk]) -> None:

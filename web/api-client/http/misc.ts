@@ -8,6 +8,8 @@ import type {
   FavoriteListParams,
   NotificationItem,
   PageResult,
+  SyncConnectorInput,
+  SyncJob,
   Task,
 } from "@/api-client/types";
 import { request, requestVoid } from "@/api-client/http/client";
@@ -23,6 +25,19 @@ export const miscApi: MiscApi = {
 
   async listConnectors() {
     return request<Connector[]>({ method: "GET", url: "/connections" });
+  },
+
+  async syncConnector(connectionId: number, input: SyncConnectorInput) {
+    // 202 + Task：resourceType="SYNC_JOB"、resourceId=同步任务 id，供 getSyncJob 轮询执行状态
+    return request<Task>({
+      method: "POST",
+      url: `/connections/${connectionId}/sync`,
+      data: { syncType: input.syncType },
+    });
+  },
+
+  async getSyncJob(jobId: number) {
+    return request<SyncJob>({ method: "GET", url: `/sync-jobs/${jobId}` });
   },
 
   async listTasks() {

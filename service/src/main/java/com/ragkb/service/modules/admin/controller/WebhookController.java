@@ -8,6 +8,7 @@ import com.ragkb.service.modules.admin.service.AdminService;
 import com.ragkb.service.modules.admin.vo.WebhookDeliveryVo;
 import com.ragkb.service.modules.admin.vo.WebhookVo;
 import jakarta.validation.Valid;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -25,9 +26,11 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 
+// 装配条件：Webhook 订阅管理依赖数据库持久化（ragkb.db.enabled=true），scaffold 模式下端点整体下线。
 @RestController
 @RequestMapping("/api/v1")
 @PreAuthorize("hasAuthority('webhook:manage')")
+@ConditionalOnProperty(name = "ragkb.db.enabled", havingValue = "true")
 public class WebhookController {
 
     private final AdminService adminService;
