@@ -496,13 +496,12 @@ p { margin: 0; }
 }
 .chat-input-footer {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-end;
   align-items: center;
   padding: 4px 12px 8px;
   font-size: 11px;
   color: var(--text-3);
 }
-.chat-input-count.near-limit { color: var(--warning); font-weight: 500; }
 .chat-input-hint { color: var(--text-3); }
 
 .chat-send-btn { height: 40px; min-width: 80px; }

@@ -171,10 +171,10 @@ public class SearchChatServiceImpl implements SearchChatService {
     @Override
     public void deleteChatSession(long chatId) {
         requireSession(chatId);
-        // 逻辑删除：MyBatis-Plus @TableLogic 转 UPDATE ... SET del_flag=1。
-        // 不使用 status='DELETED'（chat_session 的 ck_chat_session_deleted_at 要求
-        // DELETED 必有 deleted_at，实体未映射该列，走 del_flag 语义更贴合全局逻辑删除约定）。
-        chatSessionMapper.deleteById(chatId);
+        // 逻辑删除必须与 status='DELETED' 同一条 UPDATE 原子提交：
+        // ck_chat_session_del_flag 要求 del_flag=1 ⟺ status='DELETED'，
+        // 仅置 del_flag（MP deleteById）或先置 status 再删都会出现违反 CHECK 的中间态。
+        chatSessionMapper.markDeleted(chatId);
     }
 
     // =====================================================================

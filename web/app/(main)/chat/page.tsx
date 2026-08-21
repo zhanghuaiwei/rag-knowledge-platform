@@ -38,6 +38,9 @@ function ChatPageInner() {
   const bottomRef = useRef<HTMLDivElement>(null);
   // UI 级取消标记：transport 内部 SSE 聚合无暴露 abort，点击停止后丢弃待返回结果
   const cancelledRef = useRef(false);
+  // 输入框 ↑/↓ 翻阅历史提问的浏览索引（null = 未处于浏览状态）；草稿在开始浏览时暂存
+  const historyIdxRef = useRef<number | null>(null);
+  const draftRef = useRef<string>("");
   // 从知识库详情「基于此库问答」带入的库范围（新会话生效）
   const scopeKbId = Number(searchParams.get("kb")) || null;
   // 新会话知识库范围（多选，最多 5 个；F2.1 用例步骤 3）
@@ -53,6 +56,8 @@ function ChatPageInner() {
   // 加载会话消息
   useEffect(() => {
     if (activeId === null) return;
+    // 切换会话后重置历史提问浏览状态
+    historyIdxRef.current = null;
     let cancelled = false;
     setLoadingMsgs(true);
     setLoadError(false);
@@ -240,6 +245,47 @@ function ChatPageInner() {
     setMessages([]);
     router.replace("/chat");
   };
+
+  // 删除会话：后端逻辑删除；若删的是当前会话，reload 后自动切到剩余首个会话
+  const deleteSession = async (id: number) => {
+    try {
+      await api.deleteChatSession(id);
+      toast("success", "会话已删除");
+      if (activeId === id) {
+        stopStreaming();
+        setMessages([]);
+        setActiveId(null);
+      }
+      sessions.reload();
+    } catch (err: unknown) {
+      toast("error", err instanceof Error ? err.message : "删除会话失败，请重试");
+    }
+  };
+
+  // 输入框 ↑/↓ 翻阅当前会话的历史提问（类似终端历史命令）：
+  // ↑ 从最新一条往前翻；↓ 往回翻，翻出末尾时恢复浏览前的草稿。返回 null 表示无操作。
+  const navigateHistory = (dir: -1 | 1): string | null => {
+    const list = messages.map((m) => (m.role === "USER" ? m.content : "")).filter(Boolean);
+    if (list.length === 0) return null;
+    let idx = historyIdxRef.current;
+    if (dir === -1) {
+      if (idx === null) {
+        draftRef.current = input;
+        idx = list.length - 1;
+      } else {
+        idx = Math.max(0, idx - 1);
+      }
+    } else {
+      if (idx === null) return null;
+      idx += 1;
+      if (idx > list.length - 1) {
+        historyIdxRef.current = null;
+        return draftRef.current;
+      }
+    }
+    historyIdxRef.current = idx;
+    return list[idx];
+  };
   const giveFeedback = (msg: DisplayMessage, value: -1 | 1) => {
     setMessages((prev) => prev.map((m) => (m.id === msg.id ? { ...m, feedback: m.feedback === value ? 0 : value } : m)));
     if (value === -1 && msg.feedback !== -1) {
@@ -279,6 +325,7 @@ function ChatPageInner() {
         newSession();
         setMobileSessionsOpen(false);
       }}
+      onDelete={(id) => void deleteSession(id)}
     />
   );
   return (
@@ -320,6 +367,7 @@ function ChatPageInner() {
           sending={sending}
           canSend={input.trim().length > 0}
           onStop={stopStreaming}
+          onNavigateHistory={navigateHistory}
         />
       </Card>
 
