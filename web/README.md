@@ -102,3 +102,6 @@ pnpm test        # vitest run
 - [ ] 文档血缘图真实数据源(当前由文档详情推导的示意数据,见 `docs/modules/web/README.md` 遗留缺口)
 - [ ] OIDC Code + PKCE 登录、BFF 会话与 CSRF 防护(当前登录走真实 HTTP,后端 form 登录端点就绪但实现待人工补齐;实现点见 `service/application` 桩)
 - [ ] Playwright E2E 与可访问性基线验证
+
+
+

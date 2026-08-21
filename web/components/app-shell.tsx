@@ -59,7 +59,8 @@ export function AppShell({ children }: { children: ReactNode }) {
     type: "group",
     label: group.section,
     children: group.items.map((item) => ({
-      key: item.href,
+      // 父菜单（有子项）用语义 key 避免与子菜单 href 冲突；叶子项仍用 href 以便 selectedKeys 命中与 navigate 跳转
+      key: item.children ? item.key : item.href,
       icon: NAV_ICON[item.icon],
       label: item.label,
       children: item.children?.map((child) => ({

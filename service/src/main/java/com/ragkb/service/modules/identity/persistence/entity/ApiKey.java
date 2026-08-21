@@ -6,7 +6,7 @@ import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
-import com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler;
+import com.ragkb.service.common.persistence.PostgresJsonbTypeHandler;
 import java.time.Instant;
 
 import java.util.List;
@@ -14,7 +14,7 @@ import java.util.List;
 /**
  * {@code api_key} 表实体 —— 对齐 {@code deploy/ddl/init.sql}。
  *
- * <p>{@code scopes} 为 JSONB 数组列，映射 {@code List<String>}（JacksonTypeHandler），
+ * <p>{@code scopes} 为 JSONB 数组列，映射 {@code List<String>}（{@link PostgresJsonbTypeHandler}），
  * 读取需 {@code @TableName(autoResultMap = true)} 配合 resultMap 使用。
  * 只存摘要（key_digest）与明文前缀，明文与摘要不进日志。
  */
@@ -32,7 +32,7 @@ public class ApiKey extends BaseAuditEntity {
 
     private String keyPrefix;
 
-    @TableField(typeHandler = JacksonTypeHandler.class)
+    @TableField(typeHandler = PostgresJsonbTypeHandler.class)
     private List<String> scopes;
 
     private Integer rateLimitPerMinute;

@@ -132,11 +132,14 @@ class PgVectorSearchIndex(SearchIndex):
 
         allowed_document_ids 非空时按文档白名单过滤（Java 侧授权已收敛到文档集）。
         """
-        query_vector = self._embedding.embed([query.question], model=self._embedding_model)[0]
-        # 用 psycopg.sql 组合固定字面量 WHERE 子句（值全部参数绑定），无注入面。
-        # 列名带 cm. 前缀，避免与 LEFT JOIN 的 document 表列名歧义。
+        query_vector = _to_vector_literal(
+            self._embedding.embed([query.question], model=self._embedding_model)[0]
+        )
+        # 参数顺序必须与 SQL 文本中 %s 出现的顺序一致：
+        # SELECT vector → WHERE params → ORDER BY vector → LIMIT
+        params: list[Any] = [query_vector]
         clauses = [psql.SQL("cm.tenant_id = %s")]
-        params: list[Any] = [query.tenant_id]
+        params.append(query.tenant_id)
         if query.kb_ids:
             clauses.append(psql.SQL("cm.kb_id = ANY(%s)"))
             params.append(list(query.kb_ids))
@@ -158,7 +161,7 @@ class PgVectorSearchIndex(SearchIndex):
             LIMIT %s
             """
         ).format(where=where)
-        params += [query_vector, query_vector, query.top_k]
+        params += [query_vector, query.top_k]
 
         hits: list[RetrievedChunk] = []
         with self._pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
@@ -197,26 +200,30 @@ class PgVectorSearchIndex(SearchIndex):
         多租户红线：``tenant_id`` 恒为首个过滤条件，绝不省略。
         """
         # 关键词向量只编码一次，供距离排序与相似度得分两处复用。
-        query_vector = self._embedding.embed([query.keyword], model=self._embedding_model)[0]
+        query_vector = _to_vector_literal(
+            self._embedding.embed([query.keyword], model=self._embedding_model)[0]
+        )
         # 固定字面量 WHERE 子句 + 参数绑定（值全部走 %s，无注入面）。
+        # count_sql 只含 WHERE 参数；select_sql 的 %s 顺序为
+        # SELECT vector → WHERE params → ORDER BY vector → LIMIT → OFFSET
         clauses = [psql.SQL("cm.tenant_id = %s")]
-        params: list[Any] = [query.tenant_id]
+        where_params: list[Any] = [query.tenant_id]
         if query.kb_ids:
             clauses.append(psql.SQL("cm.kb_id = ANY(%s)"))
-            params.append(list(query.kb_ids))
+            where_params.append(list(query.kb_ids))
         if query.doc_id_whitelist:
             clauses.append(psql.SQL("cm.document_id = ANY(%s)"))
-            params.append(list(query.doc_id_whitelist))
+            where_params.append(list(query.doc_id_whitelist))
         if query.file_types:
             # 文件扩展名统一小写比较（document.file_ext 存储即小写）。
             clauses.append(psql.SQL("lower(d.file_ext) = ANY(%s)"))
-            params.append([ext.lower() for ext in query.file_types])
+            where_params.append([ext.lower() for ext in query.file_types])
         if query.date_from is not None:
             clauses.append(psql.SQL("d.updated_at::date >= %s"))
-            params.append(query.date_from)
+            where_params.append(query.date_from)
         if query.date_to is not None:
             clauses.append(psql.SQL("d.updated_at::date <= %s"))
-            params.append(query.date_to)
+            where_params.append(query.date_to)
         where = psql.SQL(" AND ").join(clauses)
 
         # 行查询：按余弦距离升序（相似度降序），LIMIT/OFFSET 即 offset 分页窗口。
@@ -246,11 +253,12 @@ class PgVectorSearchIndex(SearchIndex):
         ).format(where=where)
 
         with self._pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
-            cur.execute(count_sql, params)
+            cur.execute(count_sql, where_params)
             total = int(cur.fetchone()["count"])
-            # 参数顺序与 SQL 占位符一一对应：过滤参数 → 向量（score）→ 向量（排序）→ 分页。
+            # select_sql 的 %s 顺序：SELECT vector → WHERE params → ORDER BY vector → LIMIT → OFFSET
             cur.execute(
-                select_sql, params + [query_vector, query_vector, query.limit, query.offset]
+                select_sql,
+                [query_vector] + where_params + [query_vector, query.limit, query.offset],
             )
             rows = [
                 FulltextRow(

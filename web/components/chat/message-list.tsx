@@ -14,6 +14,7 @@ export function ChatMessageList({
   onGiveFeedback,
   onOpenSource,
   onSendSuggestion,
+  onRetry,
   bottomRef,
 }: {
   messages: DisplayMessage[];
@@ -21,6 +22,7 @@ export function ChatMessageList({
   onGiveFeedback: (message: DisplayMessage, value: -1 | 1) => void;
   onOpenSource: (documentId: number) => void;
   onSendSuggestion: (text: string) => void;
+  onRetry?: (message: DisplayMessage) => void;
   bottomRef: RefObject<HTMLDivElement | null>;
 }) {
   if (loadingMsgs) return <Loading />;
@@ -44,6 +46,7 @@ export function ChatMessageList({
           onGiveFeedback={(v) => onGiveFeedback(m, v)}
           onOpenSource={onOpenSource}
           onSendSuggestion={onSendSuggestion}
+          onRetry={onRetry ? () => onRetry(m) : undefined}
         />
       ))}
       <div ref={bottomRef} />
