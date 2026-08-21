@@ -84,7 +84,10 @@
     <dependency>
       <groupId>org.postgresql</groupId>
       <artifactId>postgresql</artifactId>
-      <scope>runtime</scope>
+      <!-- compile scope：PostgresJsonbTypeHandler 编译期需要 org.postgresql.util.PGobject
+           以便把 JSONB 列绑定为 PGobject(type=jsonb)，避免 varchar→jsonb 隐式转换失败。
+           驱动在运行期本就在 classpath，scope 仅放宽编译期可见性。 -->
+      <scope>compile</scope>
     </dependency>
 
     <!-- 对象存储：MinIO Java SDK（S3 兼容）。

@@ -1,5 +1,6 @@
 package com.ragkb.service.config;
 
+import jakarta.servlet.DispatcherType;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -105,11 +106,11 @@ public class SecurityConfig {
                 .csrf(csrf -> csrf.disable()) // 脚手架说明见类注释
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        // 把这个注释掉  session 又不跨域了
-                        // Authorization: Bearer xxx，这触发了预检机制。
-                        // 预检请求 OPTIONS 不带 token，被 Spring Security 当作未认证请求拦截返回 401，浏览器判定跨域失败。
-                        // 放行 OPTIONS 请求后，预检能正常返回 CORS 头，浏览器才允许后续带 token 的真实请求通过。
-                        //.requestMatchers(HttpMethod.OPTIONS, "/api/**").permitAll()  // 放行预检请求 解决auth/session 跨越的问题
+                        // 容器内部再分发（SseEmitter 的 ASYNC 完成派发、completeWithError 的 ERROR 派发）
+                        // 不是新的客户端请求：原始 REQUEST dispatch 已完成鉴权，OncePerRequestFilter
+                        // 在再分发时跳过 JWT → SecurityContext 为空，若不放行会拦截已提交的 SSE 响应，
+                        // 连接被掐断（客户端 ERR_INCOMPLETE_CHUNKED_ENCODING / 真实错误被掩成 401）。
+                        .dispatcherTypeMatchers(DispatcherType.ASYNC, DispatcherType.ERROR).permitAll()
                         .requestMatchers(
                                 "/api/v1/auth/login", "/api/v1/auth/refresh", "/api/v1/auth/logout",
                                 "/api/v1/ping", "/actuator/**", "/error")

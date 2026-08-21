@@ -12,8 +12,10 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 
+import java.net.ProxySelector;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -59,11 +61,16 @@ public class RagEngineHttpClient implements RagEnginePort {
         this.timeoutMs = timeoutMs;
         this.chatTimeoutMs = chatTimeoutMs;
         this.objectMapper = objectMapper;
-        this.restClient = RestClient.builder().baseUrl(baseUrl)
-                .defaultHeader("Content-Type", MediaType.APPLICATION_JSON_VALUE)
-                .build();
+        // 内网直连 rag-engine：显式禁用代理。IDE/系统代理（http.proxyHost 系统属性）
+        // 会劫持 localhost 调用（Clash 拒绝 → DISPATCH_FAILED），ProxySelector.of(null) 表示直连。
         this.httpClient = HttpClient.newBuilder()
+                .proxy(ProxySelector.of(null))
                 .connectTimeout(Duration.ofSeconds(10))
+                .build();
+        this.restClient = RestClient.builder()
+                .baseUrl(baseUrl)
+                .requestFactory(new JdkClientHttpRequestFactory(httpClient))
+                .defaultHeader("Content-Type", MediaType.APPLICATION_JSON_VALUE)
                 .build();
     }
 
@@ -129,6 +136,10 @@ public class RagEngineHttpClient implements RagEnginePort {
         }
         HttpRequest httpRequest = HttpRequest.newBuilder()
                 .uri(URI.create(baseUrl + "/api/query/chat"))
+                // 显式 HTTP/1.1：JDK HttpClient 默认发送 h2c Upgrade 头（Connection: Upgrade,
+                // HTTP2-Settings），uvicorn/h11 拒绝「带 body 的 POST + Upgrade」返回 400
+                // "Invalid HTTP request received."。SSE 流式本就基于 HTTP/1.1 chunked。
+                .version(HttpClient.Version.HTTP_1_1)
                 .timeout(Duration.ofMillis(chatTimeoutMs))
                 .header("Content-Type", MediaType.APPLICATION_JSON_VALUE)
                 .POST(HttpRequest.BodyPublishers.ofString(requestJson))

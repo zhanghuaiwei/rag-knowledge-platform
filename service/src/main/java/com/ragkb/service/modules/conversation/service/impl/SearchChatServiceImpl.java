@@ -218,10 +218,13 @@ public class SearchChatServiceImpl implements SearchChatService {
         payload.put("sessionId", chatId);
         payload.put("kbIds", kbIds);
         payload.put("question", request.question());
+        // 过滤空 content 的历史（失败请求残留的空 ASSISTANT 占位）：
+        // rag-engine ChatHistoryItem 要求 content min_length=1，透传空串会 422。
         payload.put("history", history.stream()
+                .filter(message -> message.getContent() != null && !message.getContent().isBlank())
                 .map(message -> Map.of(
                         "role", message.getRole().toLowerCase(),
-                        "content", message.getContent() == null ? "" : message.getContent()))
+                        "content", message.getContent()))
                 .toList());
         payload.put("kbConfig", RagEnginePort.defaultKbConfig());
 

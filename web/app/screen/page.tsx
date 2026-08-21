@@ -188,12 +188,13 @@ export default function ScreenPage() {
 
       <div className="screen-kpis">
         {[
-          { label: "今日问答", value: latest ? formatNumber(latest.qaCount) : "…" },
-          { label: "今日搜索", value: latest ? formatNumber(latest.searchCount) : "…" },
-          { label: "活跃用户", value: latest ? formatNumber(latest.activeUsers) : "…" },
-          { label: "今日成本", value: latest ? `¥${latest.cost.toFixed(2)}` : "…" },
+          { icon: "chat", label: "今日问答", value: latest ? formatNumber(latest.qaCount) : "…" },
+          { icon: "search", label: "今日搜索", value: latest ? formatNumber(latest.searchCount) : "…" },
+          { icon: "users", label: "活跃用户", value: latest ? formatNumber(latest.activeUsers) : "…" },
+          { icon: "cost", label: "今日成本", value: latest ? `¥${latest.cost.toFixed(2)}` : "…" },
         ].map((kpi) => (
           <div key={kpi.label} className="screen-panel screen-kpi">
+            <div className="screen-kpi-icon"><Icon name={kpi.icon as any} size={28} /></div>
             <div className="screen-kpi-value">{kpi.value}</div>
             <div className="screen-kpi-label">{kpi.label}</div>
           </div>
