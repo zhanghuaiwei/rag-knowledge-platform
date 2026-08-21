@@ -26,6 +26,9 @@ function ChatPageInner() {
   const [activeId, setActiveId] = useState<number | null>(null);
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [loadingMsgs, setLoadingMsgs] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  // 消息加载失败后的手动重试标记（变更触发重新拉取当前会话消息）
+  const [reloadTick, setReloadTick] = useState(0);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [feedbackTarget, setFeedbackTarget] = useState<DisplayMessage | null>(null);
@@ -52,6 +55,7 @@ function ChatPageInner() {
     if (activeId === null) return;
     let cancelled = false;
     setLoadingMsgs(true);
+    setLoadError(false);
     api
       .listChatMessages(activeId)
       .then((items: ChatMessage[]) => {
@@ -72,7 +76,9 @@ function ChatPageInner() {
       .catch(() => {
         if (!cancelled) {
           setMessages([]);
-          toast("error", "会话消息加载失败，请切换会话重试");
+          // 保留错误态（Empty 中提供重试入口），toast 仅瞬时提示
+          setLoadError(true);
+          toast("error", "会话消息加载失败，请稍后重试");
         }
       })
       .finally(() => {
@@ -81,7 +87,7 @@ function ChatPageInner() {
     return () => {
       cancelled = true;
     };
-  }, [activeId, toast]);
+  }, [activeId, toast, reloadTick]);
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
@@ -297,6 +303,8 @@ function ChatPageInner() {
           <ChatMessageList
             messages={messages}
             loadingMsgs={loadingMsgs}
+            loadError={loadError}
+            onReload={() => setReloadTick((t) => t + 1)}
             onGiveFeedback={giveFeedback}
             onOpenSource={(docId) => router.push(`/documents/${docId}`)}
             onSendSuggestion={(text) => void send(text)}
