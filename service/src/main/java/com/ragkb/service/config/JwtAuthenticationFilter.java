@@ -8,6 +8,8 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -27,6 +29,8 @@ import java.io.IOException;
  */
 @Component
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
+
+    private static final Logger log = LoggerFactory.getLogger(JwtAuthenticationFilter.class);
 
     private final TokenService tokenService;
     private final TokenBlacklistPort blacklistPort;
@@ -64,6 +68,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         } catch (ApiException e) {
             sendUnauthorized(response);
             return;
+        } catch (RuntimeException e) {
+            // 基础设施故障（如 Redis 黑名单查询超时/连接失败）：fail-closed 503（E-9998），
+            // 不裸抛为 Spring 默认 500 错误体（绕过 GlobalExceptionHandler，前端无法按信封处理）。
+            log.error("JWT 认证链基础设施异常（Redis 黑名单查询等）: {}", e.getMessage(), e);
+            sendServiceUnavailable(response);
+            return;
         }
         chain.doFilter(request, response);
     }
@@ -72,5 +82,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         response.setStatus(401);
         response.setContentType("application/json;charset=UTF-8");
         response.getWriter().write("{\"code\":\"E-1001\",\"message\":\"未认证或登录已过期\",\"data\":null}");
+    }
+
+    private void sendServiceUnavailable(HttpServletResponse response) throws IOException {
+        response.setStatus(503);
+        response.setContentType("application/json;charset=UTF-8");
+        response.getWriter().write("{\"code\":\"E-9998\",\"message\":\"认证服务暂不可用，请稍后重试\",\"data\":null}");
     }
 }

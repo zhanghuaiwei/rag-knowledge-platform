@@ -13,6 +13,8 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.time.Instant;
@@ -35,6 +37,8 @@ import java.time.Instant;
 @Component
 @Conditional(IdentityConditions.DbFormMode.class)
 public class CredentialPolicyGateFilter extends OncePerRequestFilter {
+
+    private static final Logger log = LoggerFactory.getLogger(CredentialPolicyGateFilter.class);
 
     private final ObjectProvider<UserCredentialStorePort> credentialStoreProvider;
 
@@ -66,7 +70,16 @@ public class CredentialPolicyGateFilter extends OncePerRequestFilter {
             chain.doFilter(request, response);
             return;
         }
-        UserCredentialStorePort.CredentialRecord credential = store.findByUserId(principal.userId()).orElse(null);
+        UserCredentialStorePort.CredentialRecord credential;
+        try {
+            credential = store.findByUserId(principal.userId()).orElse(null);
+        } catch (RuntimeException e) {
+            // 基础设施故障（如 DB 连接失败/超时）：fail-closed 503（E-9998），
+            // 不裸抛为 Spring 默认 500 错误体（绕过 GlobalExceptionHandler，前端无法按信封处理）。
+            log.error("凭据策略门禁 DB 读取异常: {}", e.getMessage(), e);
+            sendServiceUnavailable(response);
+            return;
+        }
         if (credential == null) {
             // 无本地凭据（如 OIDC 绑定用户）不适用本地账号策略
             chain.doFilter(request, response);
@@ -88,5 +101,11 @@ public class CredentialPolicyGateFilter extends OncePerRequestFilter {
         response.setContentType("application/json;charset=UTF-8");
         response.getWriter().write("{\"code\":\"" + code.getCode()
                 + "\",\"message\":\"" + code.getMessage() + "\",\"data\":null}");
+    }
+
+    private void sendServiceUnavailable(HttpServletResponse response) throws IOException {
+        response.setStatus(503);
+        response.setContentType("application/json;charset=UTF-8");
+        response.getWriter().write("{\"code\":\"E-9998\",\"message\":\"服务暂不可用，请稍后重试\",\"data\":null}");
     }
 }
