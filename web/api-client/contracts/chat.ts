@@ -14,6 +14,7 @@ export interface ChatApi {
   listChatSessions(params?: PageParams): Promise<PageResult<ChatSession>>;
   createChatSession(input: CreateChatSessionInput): Promise<ChatSession>;
   archiveChatSession(id: number): Promise<ChatSession>;
+  deleteChatSession(id: number): Promise<void>;
   listChatMessages(sessionId: number): Promise<ChatMessage[]>;
   sendChatMessage(input: ChatMessageInput): Promise<ChatStreamResult>;
   submitChatFeedback(input: ChatFeedbackInput): Promise<void>;

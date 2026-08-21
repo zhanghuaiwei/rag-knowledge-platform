@@ -3,7 +3,7 @@
 import { Button, Input } from "antd";
 import { SendOutlined } from "@ant-design/icons";
 
-/** 问答输入区：多行输入 + 发送/停止 + 字数统计。 */
+/** 问答输入区：多行输入 + 发送/停止 + ↑/↓ 翻阅历史提问。 */
 export function ChatInput({
   value,
   onChange,
@@ -11,6 +11,7 @@ export function ChatInput({
   sending,
   canSend,
   onStop,
+  onNavigateHistory,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -18,10 +19,9 @@ export function ChatInput({
   sending: boolean;
   canSend: boolean;
   onStop: () => void;
+  /** ↑/↓ 翻阅当前会话历史提问；返回要填充的内容，null 表示无操作。 */
+  onNavigateHistory?: (dir: -1 | 1) => string | null;
 }) {
-  const MAX_LEN = 4000;
-  const len = value.length;
-
   return (
     <div className="chat-input-area">
       <div className="chat-input-wrapper">
@@ -34,6 +34,24 @@ export function ChatInput({
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
               onSend();
+              return;
+            }
+            // ↑/↓ 翻阅历史提问：仅当光标在文本首（↑）/末（↓）时触发，不干扰多行编辑
+            const ta = e.target as HTMLTextAreaElement;
+            const atStart = ta.selectionStart === 0 && ta.selectionEnd === 0;
+            const atEnd = ta.selectionStart === ta.value.length && ta.selectionEnd === ta.value.length;
+            if (e.key === "ArrowUp" && atStart) {
+              const q = onNavigateHistory?.(-1);
+              if (q !== null && q !== undefined) {
+                e.preventDefault();
+                onChange(q);
+              }
+            } else if (e.key === "ArrowDown" && atEnd) {
+              const q = onNavigateHistory?.(1);
+              if (q !== null && q !== undefined) {
+                e.preventDefault();
+                onChange(q);
+              }
             }
           }}
           disabled={sending}
@@ -41,10 +59,7 @@ export function ChatInput({
           style={{ flex: 1 }}
         />
         <div className="chat-input-footer">
-          <span className={`chat-input-count ${len > MAX_LEN * 0.9 ? "near-limit" : ""}`}>
-            {len}/{MAX_LEN}
-          </span>
-          <span className="chat-input-hint">Enter 发送 · Shift+Enter 换行</span>
+          <span className="chat-input-hint">Enter 发送 · Shift+Enter 换行 · ↑/↓ 翻阅历史提问</span>
         </div>
       </div>
       {sending ? (

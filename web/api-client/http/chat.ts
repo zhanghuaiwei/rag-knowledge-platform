@@ -54,6 +54,11 @@ export const chatApi: ChatApi = {
     return request<ChatSession>({ method: "POST", url: `/chats/${id}/archive` });
   },
 
+  async deleteChatSession(id: number) {
+    // 后端逻辑删除（del_flag=1），成功返回 204 无信封
+    await requestVoid({ method: "DELETE", url: `/chats/${id}` });
+  },
+
   async listChatMessages(sessionId: number) {
     const page = await request<{ items?: ChatMessage[] }>({
       method: "GET",

@@ -1,7 +1,7 @@
 "use client";
 
-import { Button, List } from "antd";
-import { PlusOutlined } from "@ant-design/icons";
+import { Button, List, Popconfirm } from "antd";
+import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
 
 import type { ChatSession } from "@/api-client";
 import { Loading } from "@/components/async-state";
@@ -14,12 +14,14 @@ export function SessionList({
   activeId,
   onSelect,
   onNew,
+  onDelete,
 }: {
   sessions: ChatSession[];
   loading: boolean;
   activeId: number | null;
   onSelect: (id: number) => void;
   onNew: () => void;
+  onDelete: (id: number) => void;
 }) {
   const showDraft = activeId !== null && !sessions.some((s) => s.id === activeId);
   const items: ChatSession[] = showDraft
@@ -46,6 +48,29 @@ export function SessionList({
                 title={<span style={{ fontWeight: s.id === activeId ? 600 : 400 }}>{s.title}</span>}
                 description={`${s.messageCount} 条 · ${formatRelative(s.updatedAt)}`}
               />
+              {sessions.some((x) => x.id === s.id) ? (
+              <Popconfirm
+                title="删除会话"
+                description="删除后不可恢复，确定删除？"
+                okText="删除"
+                okButtonProps={{ danger: true }}
+                cancelText="取消"
+                onConfirm={(e) => {
+                  e?.stopPropagation();
+                  onDelete(s.id);
+                }}
+                onCancel={(e) => e?.stopPropagation()}
+              >
+                <Button
+                  type="text"
+                  size="small"
+                  danger
+                  icon={<DeleteOutlined />}
+                  aria-label="删除会话"
+                  onClick={(e) => e.stopPropagation()}
+                />
+              </Popconfirm>
+              ) : null}
             </List.Item>
           )}
         />
